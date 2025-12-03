@@ -16,7 +16,7 @@ function PlayerCard({ player, onSelect, isSelected }) {
   };
 
   const predictedPoints = player.predicted_points ?? 0;
-  const hasPrediction = player.predicted_points != null && player.predicted_points > 0;
+  const hasPrediction = player.predicted_points != null;
 
   return (
     <div 

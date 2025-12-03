@@ -5295,18 +5295,134 @@ The `/api/players` endpoint now returns players with `predicted_points` filled i
 
 ---
 
-## 9.14 Commit Progress
+## 9.14 Backtesting: Walk-Forward Validation
+
+### What is Backtesting?
+
+Backtesting validates that our prediction model works over time. It does NOT improve predictions - it just proves they work by simulating real-world deployment.
+
+### Why Not Just Train/Test Split?
+
+Regular cross-validation randomly shuffles data, but for time-series predictions:
+- Can't use GW10 data to predict GW8 (that's data leakage)
+- Must respect chronological order
+- Need to simulate "deploying the model week by week"
+
+### How Walk-Forward Validation Works
+
+```
+Step 1: Train on GW1-4  → Predict GW5  → Compare with actual
+Step 2: Train on GW1-5  → Predict GW6  → Compare with actual
+Step 3: Train on GW1-6  → Predict GW7  → Compare with actual
+...continue until end of season
+```
+
+This "walks forward" through time, always training on past data only.
+
+### The Code (`ml-service/ml/backtest.py`)
+
+```python
+def run_backtest(min_train_weeks=4):
+    # Load all gameweek data
+    df = load_season_data()
+    df = prepare_features(df)
+    
+    gameweeks = sorted(df['gw'].unique())
+    
+    for test_gw in gameweeks[min_train_weeks:]:
+        # Train ONLY on data before test gameweek
+        train_data = df[df['gw'] < test_gw]
+        test_data = df[df['gw'] == test_gw]
+        
+        # Fit model and predict
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+        predictions = model.predict(X_test)
+        
+        # Measure error
+        rmse = sqrt(mean_squared_error(y_test, predictions))
+```
+
+### Key Implementation Details
+
+**Rolling averages use `.shift(1)`** to prevent data leakage:
+```python
+df['last_3_avg_points'] = df.groupby('id')['event_points'].transform(
+    lambda x: x.rolling(3, min_periods=1).mean().shift(1)
+)
+```
+
+The `.shift(1)` ensures we only use points from PREVIOUS gameweeks, not the current one.
+
+### Interpreting Results
+
+| Metric | Good Value | Meaning |
+|--------|------------|---------|
+| R² | > 0.5 | Model explains >50% of variance |
+| RMSE | < 2.0 | Average error under 2 points |
+| RMSE std dev | < 0.5 | Consistent performance week-to-week |
+
+### Our Backtest Results (2025-26 Season, GW5-14)
+
+```
+RMSE: 2.00      (average prediction error ~2 points)
+MAE:  1.17      (median error ~1 point)  
+R²:   0.267     (explains 27% of variance)
+RMSE std dev: 0.08  (very consistent!)
+```
+
+**Why R² dropped from 0.73 to 0.27?**
+- Train/test split had subtle data leakage
+- Walk-forward is more realistic (simulates deployment)
+- Model still has predictive power, just less than we thought
+
+### Bug Fix: Multicollinearity Issue
+
+**Problem**: Early in the season, `last_3_avg_points` and `last_6_avg_points` are nearly identical (not enough games to differentiate). Linear Regression assigns huge opposing coefficients (±8 trillion!) that cancel out during training but explode during testing.
+
+**Solution**: Use Ridge Regression (`alpha=1.0`) which adds regularization to prevent extreme coefficients. This is a key concept from your ML course - regularization controls model complexity.
+
+### Running the Backtest
+
+```bash
+cd /home/atibhav/repos/fpl/ml-service
+source venv/bin/activate
+python ml/backtest.py
+```
+
+### Interview Talking Points
+
+1. **"Why walk-forward validation?"**
+   - Prevents data leakage (can't use future to predict past)
+   - Simulates real deployment conditions
+   - More realistic than random train/test split
+
+2. **"How does it work?"**
+   - Train on GW1-4, predict GW5, measure error
+   - Add GW5 to training, predict GW6, measure error
+   - Continue until end of season
+
+3. **"What do the results tell you?"**
+   - R² shows how much variance we explain
+   - RMSE/MAE show typical prediction errors
+   - Low std dev means model is reliable, not lucky
+
+### Note: Safe to Remove
+
+This module is completely isolated. If you decide it's too complex:
+1. Delete `ml-service/ml/backtest.py`
+2. Remove this section from DEVELOPMENT.md
+3. Nothing else breaks - main predictor works independently
+
+---
+
+## 9.15 Commit Progress
 
 ```bash
 cd /home/atibhav/repos/fpl
 git add .
 git status
-git commit -m "feat: Connect Spring Boot to FastAPI ML service
-
-- Create MLServiceClient for Spring Boot -> FastAPI communication
-- Update PlayerService to fetch and merge ML predictions
-- Fix invalid player ID handling in predictor (None -> 'None' bug)
-- Add graceful degradation when ML service unavailable"
+git commit -m "feat: Add walk-forward backtesting for model validation"
 
 git push origin main
 ```
