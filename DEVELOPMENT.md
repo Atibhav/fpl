@@ -3647,19 +3647,601 @@ This distribution is **important**: most predictions will be around 1-3 points, 
 
 ---
 
-## 7.7 Update .gitignore for Data Files
+## 7.7 Dataset Switch: Vaastav → FPL-Elo-Insights
 
-The Vaastav dataset is ~500MB - we don't want it in Git. Add to `.gitignore`:
+**Important Update:** After initial exploration of the Vaastav dataset, we discovered a better dataset: **FPL-Elo-Insights**.
+
+### Why We Switched Datasets
+
+During our EDA (Exploratory Data Analysis) process, we identified several limitations with the Vaastav dataset:
+
+| Limitation | Why It Matters |
+|------------|----------------|
+| **No Team Elo Ratings** | Can't quantify fixture difficulty accurately |
+| **Cumulative stats only** | Hard to get per-gameweek discrete values |
+| **No CBIT stats** | Clearances, Blocks, Interceptions, Tackles missing |
+| **No team-level xG** | Can't assess team attacking/defensive strength |
+| **Manual updates** | Data gets stale quickly |
+
+### The FPL-Elo-Insights Dataset
+
+**Source:** https://github.com/olbauday/FPL-Elo-Insights
+
+This dataset is superior because:
+
+| Feature | Vaastav | FPL-Elo-Insights |
+|---------|---------|------------------|
+| **Team Elo Ratings** | ❌ | ✅ From ClubElo.com |
+| **Per-GW discrete stats** | ❌ Cumulative | ✅ Per-gameweek |
+| **CBIT stats** | ❌ | ✅ Tackles, Blocks, etc. |
+| **Team xG data** | ❌ | ✅ xG for/against |
+| **Player match stats** | ❌ | ✅ Opta-like details |
+| **Update frequency** | Manual | Twice daily (5am/5pm UTC) |
+
+### Terminal Commands - Downloading the New Dataset:
 
 ```bash
-# Add to .gitignore
-echo "" >> /home/atibhav/repos/fpl/.gitignore
-echo "# Large data files" >> /home/atibhav/repos/fpl/.gitignore
-echo "ml-service/data/raw/" >> /home/atibhav/repos/fpl/.gitignore
-echo "ml-service/data/processed_data.csv" >> /home/atibhav/repos/fpl/.gitignore
+# Navigate to the data directory
+cd /home/atibhav/repos/fpl/ml-service/data
+
+# Create raw directory if it doesn't exist
+mkdir -p raw
+
+# Clone the FPL-Elo-Insights dataset
+cd raw
+git clone https://github.com/olbauday/FPL-Elo-Insights.git
+
+# Verify the download
+ls FPL-Elo-Insights/
+# Output: README.md  data  scripts
 ```
 
-### Full .gitignore After This Step:
+---
+
+# Step 7B: Exploratory Data Analysis (EDA) - FPL-Elo-Insights
+
+**EDA** (Exploratory Data Analysis) is the process of investigating a dataset to understand its structure, contents, and potential issues before building ML models. It's a critical first step that many beginners skip - but it's essential for building good models.
+
+## 7B.1 What is EDA and Why Do We Do It?
+
+**Exploratory Data Analysis** answers questions like:
+- What data do we have?
+- What format is it in?
+- Are there missing values?
+- What features are available?
+- How are the features distributed?
+- Are there any data quality issues?
+
+**Why it matters for ML:**
+- Helps you choose the right features
+- Identifies data quality issues early
+- Informs preprocessing decisions
+- Prevents building models on bad data
+
+## 7B.2 Exploring the Dataset Structure
+
+Let's explore what the FPL-Elo-Insights dataset contains:
+
+### Terminal Commands:
+
+```bash
+# Navigate to the dataset
+cd /home/atibhav/repos/fpl/ml-service/data/raw/FPL-Elo-Insights
+
+# See the top-level structure
+ls -la
+# Output: README.md  data  scripts
+
+# Explore the data folder
+ls data/
+# Output: 2024-2025  2025-2026
+
+# Check the current season structure (2025-2026)
+ls data/2025-2026/
+# Output: By Gameweek  fixtures.csv  players.csv  teams.csv
+```
+
+### What We Found:
+
+The dataset has a **hierarchical structure**:
+
+```
+FPL-Elo-Insights/
+└── data/
+    ├── 2024-2025/         # Previous season (different structure)
+    │   ├── matches/
+    │   ├── players/
+    │   ├── playerstats/
+    │   ├── playermatchstats/
+    │   └── teams/
+    │
+    └── 2025-2026/         # Current season (our focus)
+        ├── players.csv           # All players: id, name, team, position
+        ├── teams.csv             # All teams with Elo ratings
+        ├── fixtures.csv          # Upcoming fixtures
+        └── By Gameweek/          # Per-gameweek data
+            ├── GW1/
+            │   ├── player_gameweek_stats.csv   # Player FPL points per GW
+            │   ├── playermatchstats.csv        # Detailed match stats (xG, tackles, etc.)
+            │   └── matches.csv                 # Team xG, Elo at match time
+            ├── GW2/
+            │   └── ...
+            └── GW14/   (latest at time of writing)
+```
+
+## 7B.3 Examining the Key Data Files
+
+### 1. Teams with Elo Ratings (`teams.csv`)
+
+```bash
+# View the first few rows of teams.csv
+head -3 /home/atibhav/repos/fpl/ml-service/data/raw/FPL-Elo-Insights/data/2025-2026/teams.csv
+```
+
+**Output:**
+```
+code,id,name,short_name,strength,strength_overall_home,strength_overall_away,strength_attack_home,strength_attack_away,strength_defence_home,strength_defence_away,pulse_id,elo,fotmob_name
+3,1,Arsenal,ARS,5,1300,1375,1340,1400,1260,1350,1,2035,Arsenal
+7,2,Aston Villa,AVL,3,1145,1185,1150,1170,1140,1200,2,1882,Aston Villa
+```
+
+**What we learned:**
+- `elo` column contains ClubElo.com ratings
+- Arsenal has highest Elo (2035), indicating strongest team
+- `strength_attack_home/away` gives FPL's difficulty ratings
+
+### 2. Player Gameweek Stats (`player_gameweek_stats.csv`)
+
+```bash
+# Check columns (truncated for readability)
+head -2 /home/atibhav/repos/fpl/ml-service/data/raw/FPL-Elo-Insights/data/2025-2026/By\ Gameweek/GW1/player_gameweek_stats.csv | cut -c1-500
+```
+
+**Key columns found:**
+- `id`, `web_name`, `team`, `position` - Player identification
+- `event_points` - **Points scored THIS gameweek** (our target variable!)
+- `minutes`, `goals_scored`, `assists` - Basic stats
+- `expected_goals`, `expected_assists` - xG and xA
+- `form`, `selected_by_percent` - FPL form and ownership
+- `now_cost` - Current price
+
+**Critical insight:** Unlike Vaastav's cumulative stats, these are **per-gameweek discrete values** - exactly what we need for ML!
+
+### 3. Detailed Match Stats (`playermatchstats.csv`)
+
+```bash
+head -2 /home/atibhav/repos/fpl/ml-service/data/raw/FPL-Elo-Insights/data/2025-2026/By\ Gameweek/GW1/playermatchstats.csv | cut -c1-500
+```
+
+**Key columns found:**
+- `xg`, `xa` - Per-match expected goals/assists
+- `tackles_won`, `interceptions`, `blocks`, `clearances` - CBIT stats!
+- `touches`, `accurate_passes`, `chances_created` - Detailed performance
+- `duels_won`, `aerial_duels_won` - Physical stats
+
+### 4. Matches with Team xG (`matches.csv`)
+
+```bash
+head -2 /home/atibhav/repos/fpl/ml-service/data/raw/FPL-Elo-Insights/data/2025-2026/By\ Gameweek/GW1/matches.csv | cut -c1-600
+```
+
+**Key columns found:**
+- `home_team_elo`, `away_team_elo` - Team Elo at match time
+- `home_expected_goals_xg`, `away_expected_goals_xg` - Team xG
+- `home_possession`, `away_possession` - Possession stats
+- `home_total_shots`, `away_total_shots` - Shot data
+
+## 7B.4 EDA Summary: Data Quality Assessment
+
+After exploring the dataset, here's what we found:
+
+### Data Volume (2025-26 Season, GW1-14):
+- **10,538 player-gameweek records**
+- **756 unique players**
+- **20 teams with Elo ratings**
+- **357 matches**
+
+### Data Quality:
+| Aspect | Status | Notes |
+|--------|--------|-------|
+| Missing values | ✅ Minimal | A few NaN in rolling stats (expected) |
+| Duplicates | ✅ None | Clean data |
+| Per-GW granularity | ✅ Yes | Stats are per-gameweek, not cumulative |
+| Elo ratings | ✅ Present | Range: 1645-2035 |
+| xG data | ✅ Present | Both player and team level |
+| CBIT stats | ✅ Present | Full breakdown available |
+
+### Features Available for ML:
+
+| Category | Features |
+|----------|----------|
+| **Player Form** | last_6_avg_points, last_3_avg_points, form_trend |
+| **Playing Time** | minutes, avg_minutes |
+| **FPL Stats** | form, selected_by_percent, now_cost |
+| **Advanced Stats** | xG, xA, CBIT (tackles, blocks, etc.) |
+| **Team Strength** | Elo ratings (home and away) |
+| **Fixture Difficulty** | Opponent Elo, xG conceded |
+
+---
+
+## 7B.5 Updated Data Processor for FPL-Elo-Insights
+
+Now let's look at the updated `data_processor.py` that works with the new dataset:
+
+**File:** `ml-service/data/data_processor.py`
+
+```python
+"""
+FPL Data Processor - FPL-Elo-Insights Dataset
+==============================================
+This script processes the FPL-Elo-Insights dataset for ML model training.
+
+Data Source: https://github.com/olbauday/FPL-Elo-Insights
+
+The dataset includes:
+- Official FPL API data (player stats per gameweek)
+- Detailed match stats with xG (from FotMob)
+- Team Elo ratings (from ClubElo.com)
+- CBIT stats (Clearances, Blocks, Interceptions, Tackles)
+
+Usage:
+    cd /home/atibhav/repos/fpl/ml-service
+    source venv/bin/activate
+    python data/data_processor.py
+"""
+
+import pandas as pd
+import numpy as np
+from pathlib import Path
+import os
+
+
+# Path to the FPL-Elo-Insights data directory
+# __file__ is the path to this Python file
+# .parent gets the directory containing this file (data/)
+# Then we navigate to raw/FPL-Elo-Insights/data
+DATA_PATH = Path(__file__).parent / "raw" / "FPL-Elo-Insights" / "data"
+
+
+def load_teams_with_elo(season='2025-2026'):
+    """
+    Load team data including Elo ratings.
+    
+    Elo rating is a measure of team strength (higher = stronger).
+    Originally from chess, now used for sports teams.
+    
+    Reference values:
+    - Top teams: ~2000+ (Man City, Arsenal, Liverpool)
+    - Mid-table: ~1700-1900
+    - Relegation: ~1600-1700
+    
+    Args:
+        season: Season folder name (e.g., '2025-2026')
+    
+    Returns:
+        pd.DataFrame: Teams with Elo and strength ratings
+    """
+    # Handle different folder structures between seasons
+    # 2025-2026 has teams.csv at root, 2024-2025 has it in teams/ subfolder
+    teams_path = DATA_PATH / season / "teams.csv"
+    if not teams_path.exists():
+        teams_path = DATA_PATH / season / "teams" / "teams.csv"
+    
+    if not teams_path.exists():
+        print(f"  Warning: teams.csv not found for {season}")
+        return pd.DataFrame()
+    
+    teams = pd.read_csv(teams_path)
+    
+    print(f"  Loaded {len(teams)} teams from {season}")
+    if 'elo' in teams.columns:
+        print(f"  Elo range: {teams['elo'].min():.0f} - {teams['elo'].max():.0f}")
+    
+    return teams
+
+
+def load_player_gameweek_stats(season='2025-2026', max_gw=None):
+    """
+    Load per-gameweek discrete player stats.
+    
+    IMPORTANT: This file has NON-CUMULATIVE stats!
+    - goals_scored is goals in THAT gameweek only
+    - minutes is minutes in THAT gameweek only
+    - event_points is points in THAT gameweek only
+    
+    This is perfect for ML because:
+    1. We can calculate rolling averages correctly
+    2. No need to "diff" cumulative values
+    3. Direct match between features and target
+    
+    Args:
+        season: Season folder name (e.g., '2025-2026')
+        max_gw: Maximum gameweek to load (None = all available)
+    
+    Returns:
+        pd.DataFrame: Per-gameweek player stats
+    """
+    gw_path = DATA_PATH / season / "By Gameweek"
+    
+    all_gw_data = []
+    # os.listdir returns folder names, sorted ensures GW1, GW2, etc. order
+    gw_folders = sorted([f for f in os.listdir(gw_path) if f.startswith('GW')])
+    
+    for gw_folder in gw_folders:
+        gw_num = int(gw_folder.replace('GW', ''))  # Extract gameweek number
+        
+        if max_gw and gw_num > max_gw:
+            continue
+        
+        stats_file = gw_path / gw_folder / "player_gameweek_stats.csv"
+        
+        if stats_file.exists():
+            gw_df = pd.read_csv(stats_file)
+            gw_df['gw'] = gw_num        # Add gameweek column
+            gw_df['season'] = season    # Add season column
+            all_gw_data.append(gw_df)
+    
+    if not all_gw_data:
+        print(f"  Warning: No gameweek data found for {season}")
+        return pd.DataFrame()
+    
+    # pd.concat combines all the DataFrames into one
+    # ignore_index=True creates a new sequential index
+    combined = pd.concat(all_gw_data, ignore_index=True)
+    print(f"  Loaded {len(combined)} player-gameweek records from {season}")
+    print(f"  Gameweeks: {combined['gw'].min()} to {combined['gw'].max()}")
+    
+    return combined
+
+
+def calculate_rolling_form(player_gw_df, window=6):
+    """
+    Calculate rolling form features for each player.
+    
+    This is a KEY feature engineering step!
+    
+    Rolling averages capture "form" - a player's recent performance trend.
+    FPL managers know that form is one of the best predictors of future points.
+    
+    We use window=6 because:
+    - 6 games = roughly 1.5 months of matches
+    - Long enough to smooth out variance
+    - Short enough to capture current form
+    - Matches the user's request for "last 6 games emphasis"
+    
+    The shift(1) is CRITICAL:
+    - It prevents "data leakage" (using future data to predict past)
+    - When predicting GW15, we only use data from GW1-14
+    
+    Args:
+        player_gw_df: Per-gameweek player stats DataFrame
+        window: Number of games to look back (default 6)
+    
+    Returns:
+        pd.DataFrame: DataFrame with new rolling feature columns
+    """
+    df = player_gw_df.copy()
+    
+    # Sort by player and gameweek - ESSENTIAL for rolling calculations
+    df = df.sort_values(['id', 'season', 'gw'])
+    
+    # Rolling average points (last N games)
+    # lambda x: applies the function to each player group
+    # rolling(window) creates a rolling window of N games
+    # mean() calculates the average
+    # shift(1) shifts down by 1 row - so we don't include current game
+    df[f'last_{window}_avg_points'] = df.groupby('id')['event_points'].transform(
+        lambda x: x.rolling(window, min_periods=1).mean().shift(1)
+    )
+    
+    # Rolling average minutes - important for predicting playing time
+    df[f'last_{window}_avg_minutes'] = df.groupby('id')['minutes'].transform(
+        lambda x: x.rolling(window, min_periods=1).mean().shift(1)
+    )
+    
+    # Shorter window for very recent form (last 3 games)
+    # This captures hot streaks or sudden dips in form
+    df['last_3_avg_points'] = df.groupby('id')['event_points'].transform(
+        lambda x: x.rolling(3, min_periods=1).mean().shift(1)
+    )
+    
+    # Form trend: are they improving or declining?
+    # Positive = improving (last 3 > last 6)
+    # Negative = declining (last 3 < last 6)
+    df['form_trend'] = df['last_3_avg_points'] - df[f'last_{window}_avg_points']
+    
+    # Fill NaN values for players with no history (first games)
+    # We use reasonable defaults based on league averages
+    df[f'last_{window}_avg_points'] = df[f'last_{window}_avg_points'].fillna(2.0)
+    df[f'last_{window}_avg_minutes'] = df[f'last_{window}_avg_minutes'].fillna(60.0)
+    df['last_3_avg_points'] = df['last_3_avg_points'].fillna(2.0)
+    df['form_trend'] = df['form_trend'].fillna(0.0)
+    
+    return df
+
+
+def process_data(seasons=None, save_processed=True):
+    """
+    Main data processing pipeline.
+    
+    This function orchestrates the entire data preprocessing workflow:
+    1. Load raw data from FPL-Elo-Insights
+    2. Calculate rolling form features
+    3. Prepare X (features) and y (target) for ML
+    4. Save processed data to CSV
+    
+    Args:
+        seasons: List of seasons to process (default: current season only)
+        save_processed: Whether to save processed data to CSV
+    
+    Returns:
+        tuple: (X, y, df_processed) - features, target, full dataframe
+    """
+    if seasons is None:
+        # Use current season which has the "By Gameweek" structure
+        # 2024-2025 has a different structure without per-gameweek breakdowns
+        seasons = ['2025-2026']
+    
+    print("=" * 60)
+    print("FPL Data Processing Pipeline (FPL-Elo-Insights)")
+    print("=" * 60)
+    
+    all_data = []
+    
+    for season in seasons:
+        print(f"\n--- Processing {season} ---")
+        
+        # Step 1: Load teams with Elo ratings
+        print("\n1. Loading teams with Elo ratings...")
+        teams = load_teams_with_elo(season)
+        
+        # Step 2: Load player gameweek stats
+        print("\n2. Loading player gameweek stats...")
+        player_gw = load_player_gameweek_stats(season)
+        
+        if len(player_gw) > 0:
+            all_data.append(player_gw)
+    
+    if not all_data:
+        raise ValueError("No data loaded!")
+    
+    combined = pd.concat(all_data, ignore_index=True)
+    print(f"\n--- Combined Data ---")
+    print(f"  Total records: {len(combined)}")
+    
+    # Step 3: Calculate rolling form features
+    print("\n3. Calculating rolling form features...")
+    df_processed = calculate_rolling_form(combined, window=6)
+    
+    # Step 4: Prepare training data (X and y)
+    print("\n4. Preparing training data...")
+    
+    # Features we'll use for ML prediction
+    feature_columns = [
+        'last_6_avg_points',      # Form over last 6 games
+        'last_3_avg_points',      # Recent form (last 3 games)
+        'form_trend',             # Improving or declining?
+        'last_6_avg_minutes',     # Playing time consistency
+        'form',                   # FPL's built-in form stat
+        'now_cost',               # Price (proxy for quality)
+        'selected_by_percent',    # Ownership (wisdom of crowds)
+    ]
+    
+    # Check which features are actually available
+    available_features = [col for col in feature_columns if col in df_processed.columns]
+    
+    if not available_features:
+        print("  Warning: No features found!")
+        return None, None, df_processed
+    
+    # Remove rows with NaN in features
+    df_clean = df_processed.dropna(subset=available_features)
+    
+    X = df_clean[available_features]
+    y = df_clean['event_points']  # Target: points in that gameweek
+    
+    print(f"  Features: {available_features}")
+    print(f"  Training samples: {len(X)}")
+    print(f"  Target mean: {y.mean():.2f}, std: {y.std():.2f}")
+    
+    if save_processed:
+        output_path = Path(__file__).parent / "processed_data.csv"
+        df_clean.to_csv(output_path, index=False)
+        print(f"\n✓ Saved processed data to: {output_path}")
+    
+    print("\n" + "=" * 60)
+    print("Data processing complete!")
+    print("=" * 60)
+    
+    return X, y, df_clean
+
+
+# Run if executed directly (not imported)
+if __name__ == '__main__':
+    X, y, df = process_data()
+    
+    if X is not None:
+        print(f"\nDataset Summary:")
+        print(f"  Shape: {X.shape}")
+        print(f"  Features: {list(X.columns)}")
+        print(f"\nTarget (event_points) statistics:")
+        print(f"  Mean: {y.mean():.2f}")
+        print(f"  Std: {y.std():.2f}")
+        print(f"  Min: {y.min()}, Max: {y.max()}")
+```
+
+## 7B.6 Running the Updated Data Processor
+
+### Terminal Commands:
+
+```bash
+# Navigate to ml-service and activate virtual environment
+cd /home/atibhav/repos/fpl/ml-service
+source venv/bin/activate
+
+# Run the data processor
+python data/data_processor.py
+```
+
+### Expected Output (FPL-Elo-Insights):
+
+```
+============================================================
+FPL Data Processing Pipeline (FPL-Elo-Insights)
+============================================================
+
+--- Processing 2025-2026 ---
+
+1. Loading teams with Elo ratings...
+  Loaded 20 teams from 2025-2026
+  Elo range: 1645 - 2035
+
+2. Loading player gameweek stats...
+  Loaded 10538 player-gameweek records from 2025-2026
+  Gameweeks: 1 to 14
+
+--- Combined Data ---
+  Total records: 10538
+
+3. Calculating rolling form features...
+
+4. Preparing training data...
+  Features: ['last_6_avg_points', 'last_3_avg_points', 'form_trend', 
+             'last_6_avg_minutes', 'form', 'now_cost', 'selected_by_percent']
+  Training samples: 10538
+  Target mean: 1.15, std: 2.36
+
+✓ Saved processed data to: /home/atibhav/repos/fpl/ml-service/data/processed_data.csv
+
+============================================================
+Data processing complete!
+============================================================
+
+Dataset Summary:
+  Shape: (10538, 7)
+  Features: ['last_6_avg_points', 'last_3_avg_points', 'form_trend', 
+             'last_6_avg_minutes', 'form', 'now_cost', 'selected_by_percent']
+
+Target (event_points) statistics:
+  Mean: 1.15
+  Std: 2.36
+  Min: -3, Max: 24
+```
+
+---
+
+## 7B.7 Update .gitignore for New Dataset
+
+The FPL-Elo-Insights dataset should not be committed to Git. Update `.gitignore`:
+
+```bash
+# Update .gitignore to exclude the new dataset
+echo "" >> /home/atibhav/repos/fpl/.gitignore
+echo "# FPL-Elo-Insights dataset (large, auto-updated)" >> /home/atibhav/repos/fpl/.gitignore
+echo "ml-service/data/raw/FPL-Elo-Insights/" >> /home/atibhav/repos/fpl/.gitignore
+```
+
+### Current .gitignore:
 
 ```gitignore
 # Node.js
@@ -3685,14 +4267,77 @@ target/
 # Logs
 *.log
 
-# Large data files
-ml-service/data/raw/
+# Large data files (ML Service)
+ml-service/data/raw/FPL-Elo-Insights/
 ml-service/data/processed_data.csv
 ```
 
 ---
 
-## 7.8 Project Structure After Step 7
+## 7B.8 Key Python Concepts Explained
+
+### 1. Path Objects (`pathlib`)
+
+```python
+from pathlib import Path
+
+# __file__ is a special variable = path to current Python file
+# Path() creates a Path object for easy manipulation
+DATA_PATH = Path(__file__).parent / "raw" / "FPL-Elo-Insights" / "data"
+
+# / operator joins paths (like os.path.join but cleaner)
+# .parent gets the directory containing the file
+# .exists() checks if path exists
+```
+
+**Why use Path over strings?**
+- Works on Windows and Linux automatically
+- Cleaner syntax with `/` operator
+- Built-in methods like `.exists()`, `.mkdir()`, `.glob()`
+
+### 2. Pandas GroupBy and Transform
+
+```python
+df['last_6_avg_points'] = df.groupby('id')['event_points'].transform(
+    lambda x: x.rolling(6, min_periods=1).mean().shift(1)
+)
+```
+
+Breaking this down:
+1. `df.groupby('id')` - Split data by player ID
+2. `['event_points']` - Select the points column
+3. `.transform(...)` - Apply function and return same-sized result
+4. `lambda x:` - Anonymous function for each player's data
+5. `x.rolling(6)` - Create 6-game rolling window
+6. `.mean()` - Calculate average
+7. `.shift(1)` - Shift down by 1 row (exclude current game)
+
+### 3. Lambda Functions
+
+```python
+# These are equivalent:
+def calculate_rolling_avg(x):
+    return x.rolling(6).mean().shift(1)
+
+# vs
+lambda x: x.rolling(6).mean().shift(1)
+```
+
+Lambda functions are "anonymous" - useful for one-time operations like in `.transform()`.
+
+### 4. pd.concat for Combining DataFrames
+
+```python
+# Combine multiple DataFrames vertically (stack rows)
+combined = pd.concat(all_gw_data, ignore_index=True)
+```
+
+- `all_gw_data` is a list of DataFrames (one per gameweek)
+- `ignore_index=True` creates a new sequential index (0, 1, 2, ...)
+
+---
+
+## 7B.9 Project Structure After Dataset Switch
 
 ```
 fpl/
@@ -3713,21 +4358,58 @@ fpl/
     │   └── __init__.py
     ├── data/
     │   ├── __init__.py
-    │   ├── data_processor.py     # NEW: Data preprocessing pipeline
-    │   ├── processed_data.csv    # NEW: Processed training data (not in Git)
-    │   └── raw/                  # NEW: Vaastav dataset (not in Git)
-    │       └── Fantasy-Premier-League/
+    │   ├── data_processor.py     # UPDATED: For FPL-Elo-Insights
+    │   ├── processed_data.csv    # Generated (not in Git)
+    │   └── raw/                  # (not in Git)
+    │       └── FPL-Elo-Insights/ # NEW dataset
+    │           └── data/
+    │               ├── 2024-2025/
+    │               └── 2025-2026/
+    │                   ├── teams.csv
+    │                   ├── players.csv
+    │                   └── By Gameweek/
+    │                       ├── GW1/
+    │                       ├── GW2/
+    │                       └── ...
     └── models/
 ```
 
 ---
 
-## 7.9 Next Steps
+## 7B.10 Next Steps
 
-With the data pipeline complete, we can now:
+With the updated data pipeline complete, we can now:
 
-1. **Train baseline Linear Regression model** → Establish performance baseline
-2. **Train advanced models** → Random Forest, SVR, Ensemble
-3. **Create prediction endpoint** → Connect models to FastAPI
-4. **Integrate with Spring Boot** → End-to-end predictions in the app
+1. **Enhance features** - Add Team Elo, Opponent Elo, xG, xA, position encoding
+2. **Train baseline Linear Regression model** → Establish performance baseline
+3. **Train advanced models** → Random Forest, SVR, Ensemble
+4. **Create prediction endpoint** → Connect models to FastAPI
+5. **Integrate with Spring Boot** → End-to-end predictions in the app
+
+---
+
+## 7B.11 Commit Progress
+
+```bash
+# Stage all changes
+cd /home/atibhav/repos/fpl
+git add .
+
+# Check what will be committed
+git status
+
+# Commit with descriptive message
+git commit -m "feat(ml): Switch to FPL-Elo-Insights dataset with Elo ratings
+
+- Replaced Vaastav dataset with FPL-Elo-Insights (more comprehensive)
+- New dataset includes: Team Elo ratings, per-gameweek discrete stats, 
+  CBIT stats (clearances/blocks/interceptions/tackles), xG/xA per match
+- Updated data_processor.py for new dataset structure
+- Processing 10,538 samples from GW1-14 of 2025-26 season
+- Features: rolling form (last 6 games), FPL form, price, ownership
+- Data updates twice daily (5am/5pm UTC)"
+
+# Push to GitHub
+git push origin main
+```
 
