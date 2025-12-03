@@ -1,0 +1,138 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #1a1a2e;
+  color: #eee;
+}
+
+.App {
+  min-height: 100vh;
+}
+
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 30px;
+  background-color: #16213e;
+  border-bottom: 1px solid #2a2a4e;
+}
+
+.nav-brand {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #00ff87;
+  text-decoration: none;
+}
+
+.nav-links {
+  display: flex;
+  gap: 24px;
+}
+
+.nav-links a {
+  color: #aaa;
+  text-decoration: none;
+  font-size: 0.95rem;
+  transition: color 0.2s ease;
+}
+
+.nav-links a:hover {
+  color: #00ff87;
+}
+
+.main-content {
+  min-height: calc(100vh - 60px);
+}
+
+.home-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 60px);
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.home-page h1 {
+  font-size: 3rem;
+  color: #00ff87;
+  margin-bottom: 16px;
+}
+
+.tagline {
+  font-size: 1.2rem;
+  color: #888;
+  max-width: 500px;
+  margin-bottom: 50px;
+}
+
+.feature-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  max-width: 1000px;
+  width: 100%;
+}
+
+.feature-card {
+  background-color: #16213e;
+  border-radius: 12px;
+  padding: 30px;
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.3s ease;
+  border: 2px solid transparent;
+}
+
+.feature-card:hover {
+  transform: translateY(-4px);
+  border-color: #00ff87;
+  background-color: #1a2744;
+}
+
+.feature-card.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.feature-card.disabled:hover {
+  transform: none;
+  border-color: transparent;
+  background-color: #16213e;
+}
+
+.feature-card h2 {
+  font-size: 1.4rem;
+  margin-bottom: 12px;
+  color: #fff;
+}
+
+.feature-card p {
+  color: #888;
+  line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+  .home-page h1 {
+    font-size: 2rem;
+  }
+  
+  .tagline {
+    font-size: 1rem;
+  }
+  
+  .navbar {
+    padding: 15px 20px;
+  }
+  
+  .nav-links {
+    gap: 16px;
+  }
+}
