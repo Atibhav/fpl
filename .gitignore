@@ -119,3 +119,12 @@ tmp/
 temp/
 *.tmp
 
+# -----------------------------------------------------------------------------
+# Large Data Files (ml-service)
+# -----------------------------------------------------------------------------
+# Vaastav FPL dataset (download with: git clone https://github.com/vaastav/Fantasy-Premier-League.git)
+ml-service/data/raw/
+
+# Processed data (regenerate with: python data/data_processor.py)
+ml-service/data/processed_data.csv
+

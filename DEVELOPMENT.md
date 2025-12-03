@@ -3071,3 +3071,663 @@ Now that FastAPI is set up with placeholder endpoints, we need to:
 3. **Train Linear Regression baseline** → First real ML model
 4. **Connect Spring Boot to FastAPI** → End-to-end predictions
 
+---
+
+# Step 7: Data Pipeline
+
+**Goal:** Download historical FPL data and create a preprocessing pipeline to prepare it for ML training.
+
+## 7.1 Download the Vaastav Dataset
+
+The [Vaastav Fantasy-Premier-League dataset](https://github.com/vaastav/Fantasy-Premier-League) is a community-maintained dataset with FPL player statistics from 2016 onwards.
+
+### Terminal Commands:
+
+```bash
+# Create the raw data directory
+mkdir -p /home/atibhav/repos/fpl/ml-service/data/raw
+
+# Navigate to the directory
+cd /home/atibhav/repos/fpl/ml-service/data/raw
+
+# Clone the dataset (shallow clone to save space - only latest commit)
+git clone --depth 1 https://github.com/vaastav/Fantasy-Premier-League.git
+
+# Check what was downloaded
+ls -la Fantasy-Premier-League/data/
+```
+
+**Expected Output:**
+```
+drwxr-xr-x 2016-17
+drwxr-xr-x 2017-18
+drwxr-xr-x 2018-19
+drwxr-xr-x 2019-20
+drwxr-xr-x 2020-21
+drwxr-xr-x 2021-22
+drwxr-xr-x 2022-23
+drwxr-xr-x 2023-24
+drwxr-xr-x 2024-25
+drwxr-xr-x 2025-26
+-rw-r--r-- cleaned_merged_seasons.csv
+-rw-r--r-- cleaned_merged_seasons_team_aggregated.csv
+-rw-r--r-- master_team_list.csv
+```
+
+### Explore the Data Structure:
+
+```bash
+# Check one season's folder structure
+ls -la /home/atibhav/repos/fpl/ml-service/data/raw/Fantasy-Premier-League/data/2023-24/
+
+# Output:
+# cleaned_players.csv  - Summary player data
+# fixtures.csv         - Match fixtures
+# gws/                 - Gameweek-by-gameweek data
+# player_idlist.csv    - Player ID mappings
+# players/             - Individual player files
+# players_raw.csv      - Raw player data
+# teams.csv            - Team information
+# understat/           - Advanced stats (xG, etc.)
+```
+
+### Inspect the Gameweek Data:
+
+```bash
+# Check the merged gameweek file (this is what we'll use)
+head -3 /home/atibhav/repos/fpl/ml-service/data/raw/Fantasy-Premier-League/data/2023-24/gws/merged_gw.csv
+
+# Output shows columns like:
+# name, position, team, xP, assists, bonus, bps, clean_sheets, creativity,
+# element, expected_assists, expected_goal_involvements, expected_goals,
+# goals_scored, ict_index, influence, minutes, total_points, value, was_home, GW, etc.
+```
+
+---
+
+## 7.2 Understanding the Dataset
+
+### What is `merged_gw.csv`?
+
+Each row represents **one player's performance in one gameweek**. Key columns:
+
+| Column | Description | Use in ML |
+|--------|-------------|-----------|
+| `name` | Player name | Identifier |
+| `position` | GKP, DEF, MID, FWD | Feature |
+| `team` | Player's team | Feature |
+| `opponent_team` | Opposition team | Feature |
+| `was_home` | True/False | Feature |
+| `total_points` | FPL points scored | **Target** |
+| `minutes` | Minutes played | Feature |
+| `goals_scored` | Goals scored | Feature |
+| `assists` | Assists | Feature |
+| `value` | Price (in 0.1m units, e.g., 59 = £5.9m) | Feature |
+| `GW` | Gameweek number | Feature |
+
+### Why Use 3 Seasons?
+
+We use 2022-23, 2023-24, and 2024-25 because:
+- **Recency**: These are the 3 most recent completed seasons (2025-26 is current/ongoing)
+- **Volume**: ~75,000+ samples is plenty for training
+- **Relevance**: Players from these seasons are most likely still active
+
+---
+
+## 7.3 Create the Data Processor
+
+**File:** `ml-service/data/data_processor.py`
+
+```python
+"""
+FPL Data Processor
+==================
+This module handles loading, cleaning, and preprocessing historical FPL data
+from the Vaastav Fantasy-Premier-League dataset.
+
+Features:
+- Load data from multiple seasons
+- Clean missing values
+- Encode categorical features
+- Engineer rolling statistics and derived features
+- Prepare training data for ML models
+
+Usage:
+    python data_processor.py
+"""
+
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+
+# Path to the raw data directory
+RAW_DATA_PATH = Path(__file__).parent / "raw" / "Fantasy-Premier-League" / "data"
+
+
+def load_historical_data(seasons=None):
+    """
+    Load player gameweek data from multiple seasons.
+    
+    The Vaastav dataset has a 'merged_gw.csv' file in each season's 'gws' folder.
+    This file contains one row per player per gameweek with all their stats.
+    
+    Args:
+        seasons: List of season strings (e.g., ['2022-23', '2023-24'])
+                 If None, loads last 3 seasons by default.
+    
+    Returns:
+        pd.DataFrame: Combined data from all seasons
+    """
+    if seasons is None:
+        # Default: Use last 3 completed seasons (good balance of data volume and relevance)
+        # Current season is 2025-26, so we use 2022-23, 2023-24, 2024-25
+        seasons = ['2022-23', '2023-24', '2024-25']
+    
+    all_data = []
+    
+    for season in seasons:
+        file_path = RAW_DATA_PATH / season / "gws" / "merged_gw.csv"
+        
+        if not file_path.exists():
+            print(f"  Warning: {file_path} not found, skipping {season}")
+            continue
+        
+        print(f"  Loading {season}...")
+        df = pd.read_csv(file_path)
+        df['season'] = season
+        all_data.append(df)
+        print(f"    -> {len(df)} rows loaded")
+    
+    if not all_data:
+        raise ValueError("No data files found! Check the data path.")
+    
+    combined = pd.concat(all_data, ignore_index=True)
+    print(f"  Total: {len(combined)} rows from {len(all_data)} seasons")
+    
+    return combined
+
+
+def clean_data(df):
+    """
+    Handle missing values and clean the dataset.
+    
+    ML models can't handle NaN values, so we need to:
+    1. Remove rows where the target variable (total_points) is missing
+    2. Fill missing numeric values with 0 (sensible default for stats)
+    3. Remove any duplicate rows
+    
+    Args:
+        df: Raw DataFrame
+    
+    Returns:
+        pd.DataFrame: Cleaned DataFrame
+    """
+    initial_count = len(df)
+    
+    # Remove rows with missing target variable
+    df = df.dropna(subset=['total_points'])
+    after_target = len(df)
+    
+    # Fill missing numeric values with 0
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    df[numeric_cols] = df[numeric_cols].fillna(0)
+    
+    # Remove duplicates (same player, same gameweek, same season)
+    df = df.drop_duplicates(subset=['name', 'GW', 'season'], keep='first')
+    final_count = len(df)
+    
+    print(f"  Rows: {initial_count} -> {after_target} (dropped missing) -> {final_count} (dropped duplicates)")
+    
+    return df
+
+
+def encode_features(df):
+    """
+    Convert categorical features to numeric values for ML models.
+    
+    ML models work with numbers, not strings. We need to convert:
+    - Position (GK, DEF, MID, FWD) -> (0, 1, 2, 3)
+    - Team names -> numeric IDs
+    - Home/Away -> (1, 0)
+    - Kickoff time -> month, day of week, hour
+    
+    Args:
+        df: Cleaned DataFrame
+    
+    Returns:
+        pd.DataFrame: DataFrame with encoded features
+    """
+    # Position encoding - ordered by typical points potential
+    position_map = {'GKP': 0, 'GK': 0, 'DEF': 1, 'MID': 2, 'FWD': 3}
+    df['position_encoded'] = df['position'].map(position_map)
+    
+    # Handle any positions not in the map
+    if df['position_encoded'].isna().any():
+        unmapped = df[df['position_encoded'].isna()]['position'].unique()
+        print(f"  Warning: Unmapped positions found: {unmapped}")
+        df['position_encoded'] = df['position_encoded'].fillna(1)  # Default to DEF
+    
+    # Team encoding - use category codes (consistent within dataset)
+    df['team_encoded'] = df['team'].astype('category').cat.codes
+    
+    # Opponent encoding
+    df['opponent_encoded'] = df['opponent_team'].astype('category').cat.codes
+    
+    # Home/Away encoding (was_home is already boolean in some datasets)
+    if df['was_home'].dtype == bool:
+        df['is_home'] = df['was_home'].astype(int)
+    else:
+        df['is_home'] = (df['was_home'] == True).astype(int)
+    
+    # Time-based features from kickoff_time
+    df['kickoff_time'] = pd.to_datetime(df['kickoff_time'], errors='coerce')
+    df['month'] = df['kickoff_time'].dt.month.fillna(8).astype(int)  # Default to August
+    df['day_of_week'] = df['kickoff_time'].dt.dayofweek.fillna(5).astype(int)  # Default to Saturday
+    df['hour'] = df['kickoff_time'].dt.hour.fillna(15).astype(int)  # Default to 3pm
+    
+    return df
+
+
+def engineer_features(df):
+    """
+    Create rolling statistics and derived features.
+    
+    This is where we add features that capture player "form" - their recent
+    performance. Rolling averages are very predictive for FPL points.
+    
+    Key features:
+    - last_3_avg_points: Average points over last 3 games
+    - last_5_avg_points: Average points over last 5 games  
+    - minutes_per_game: Rolling average of minutes played
+    - goals_per_90, assists_per_90: Per-90-minute stats
+    
+    The .shift(1) is crucial - it prevents data leakage by only using
+    past data to predict future points.
+    
+    Args:
+        df: Encoded DataFrame
+    
+    Returns:
+        pd.DataFrame: DataFrame with engineered features
+    """
+    # Sort by player and time for correct rolling calculations
+    df = df.sort_values(['name', 'season', 'GW'])
+    
+    # Rolling averages - these capture "form"
+    # shift(1) ensures we don't use the current game's data
+    df['last_3_avg_points'] = df.groupby('name')['total_points'].transform(
+        lambda x: x.rolling(3, min_periods=1).mean().shift(1)
+    )
+    
+    df['last_5_avg_points'] = df.groupby('name')['total_points'].transform(
+        lambda x: x.rolling(5, min_periods=1).mean().shift(1)
+    )
+    
+    # Minutes consistency (important for predicting playing time)
+    df['avg_minutes'] = df.groupby('name')['minutes'].transform(
+        lambda x: x.rolling(5, min_periods=1).mean().shift(1)
+    )
+    
+    # Goals and assists per 90 minutes (normalized stats)
+    # Add small epsilon to avoid division by zero
+    df['goals_per_90'] = (df['goals_scored'] / (df['minutes'] + 0.1) * 90)
+    df['assists_per_90'] = (df['assists'] / (df['minutes'] + 0.1) * 90)
+    
+    # Clip extreme values (can happen with low minutes)
+    df['goals_per_90'] = df['goals_per_90'].clip(0, 5)
+    df['assists_per_90'] = df['assists_per_90'].clip(0, 5)
+    
+    # Fill NaN values from rolling (first games of season)
+    df['last_3_avg_points'] = df['last_3_avg_points'].fillna(2.0)  # Default ~2 points
+    df['last_5_avg_points'] = df['last_5_avg_points'].fillna(2.0)
+    df['avg_minutes'] = df['avg_minutes'].fillna(60.0)  # Assume 60 min default
+    
+    # Season points total (cumulative performance)
+    df['season_total_points'] = df.groupby(['name', 'season'])['total_points'].transform(
+        lambda x: x.expanding().sum().shift(1)
+    ).fillna(0)
+    
+    return df
+
+
+def prepare_training_data(df):
+    """
+    Prepare X (features) and y (target) for training.
+    
+    We select only the features that will be available at prediction time.
+    The target is 'total_points' - what we want to predict.
+    
+    Args:
+        df: Fully processed DataFrame
+    
+    Returns:
+        tuple: (X, y, df) - features, target, and full dataframe
+    """
+    # Features we'll use for prediction
+    # These are all things we know BEFORE the gameweek starts
+    feature_columns = [
+        'position_encoded',     # Player position (GK, DEF, MID, FWD)
+        'team_encoded',         # Player's team
+        'opponent_encoded',     # Opponent team
+        'is_home',              # Home or away game
+        'value',                # Player price (proxy for quality)
+        'last_3_avg_points',    # Recent form (3 games)
+        'last_5_avg_points',    # Recent form (5 games)
+        'avg_minutes',          # Expected minutes
+        'goals_per_90',         # Scoring rate
+        'assists_per_90',       # Assist rate
+        'month',                # Time of season
+        'day_of_week',          # Day of match
+    ]
+    
+    # Verify all columns exist
+    missing_cols = [col for col in feature_columns if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing columns: {missing_cols}")
+    
+    # Remove rows with NaN in features
+    df_clean = df.dropna(subset=feature_columns)
+    
+    X = df_clean[feature_columns]
+    y = df_clean['total_points']
+    
+    print(f"  Features: {len(feature_columns)}")
+    print(f"  Training samples: {len(X)}")
+    
+    return X, y, df_clean
+
+
+def process_data(seasons=None, save_processed=True):
+    """
+    Main pipeline to process FPL data.
+    
+    Runs the full preprocessing pipeline:
+    1. Load data from multiple seasons
+    2. Clean missing values
+    3. Encode categorical features  
+    4. Engineer rolling statistics
+    5. Prepare training data
+    
+    Args:
+        seasons: List of seasons to load (default: last 3)
+        save_processed: Whether to save processed data to CSV
+    
+    Returns:
+        tuple: (X, y, df) - features, target, and full dataframe
+    """
+    print("=" * 50)
+    print("FPL Data Processing Pipeline")
+    print("=" * 50)
+    
+    print("\n1. Loading historical data...")
+    df = load_historical_data(seasons)
+    
+    print("\n2. Cleaning data...")
+    df = clean_data(df)
+    
+    print("\n3. Encoding features...")
+    df = encode_features(df)
+    
+    print("\n4. Engineering features...")
+    df = engineer_features(df)
+    
+    print("\n5. Preparing training data...")
+    X, y, df_clean = prepare_training_data(df)
+    
+    if save_processed:
+        output_path = Path(__file__).parent / "processed_data.csv"
+        df_clean.to_csv(output_path, index=False)
+        print(f"\n✓ Saved processed data to: {output_path}")
+    
+    print("\n" + "=" * 50)
+    print("Data processing complete!")
+    print("=" * 50)
+    
+    return X, y, df_clean
+
+
+# Run if executed directly
+if __name__ == '__main__':
+    X, y, df = process_data()
+    
+    print(f"\nDataset Summary:")
+    print(f"  Shape: {X.shape}")
+    print(f"  Features: {X.columns.tolist()}")
+    print(f"\nTarget (total_points) statistics:")
+    print(f"  Mean: {y.mean():.2f}")
+    print(f"  Std: {y.std():.2f}")
+    print(f"  Min: {y.min()}, Max: {y.max()}")
+```
+
+---
+
+## 7.4 Key ML Concepts Explained
+
+### What is Feature Engineering?
+
+**Feature engineering** is the process of creating new input variables from raw data that help ML models make better predictions. It's often the most important part of ML.
+
+**Example**: Instead of using raw `goals_scored` (which is 0 for most players most weeks), we create `goals_per_90` which normalizes by minutes played. This captures a player's scoring *rate*, not just their raw count.
+
+### Why Rolling Averages?
+
+A player's **recent form** is highly predictive of future performance. Rolling averages capture this:
+
+```python
+# Last 3 games average
+df['last_3_avg_points'] = df.groupby('name')['total_points'].transform(
+    lambda x: x.rolling(3, min_periods=1).mean().shift(1)
+)
+```
+
+- `groupby('name')`: Calculate separately for each player
+- `rolling(3)`: Look at a window of 3 games
+- `mean()`: Take the average
+- `shift(1)`: **Critical** - only use past data, not current game (prevents data leakage)
+
+### What is Data Leakage?
+
+**Data leakage** occurs when your model accidentally uses information from the future to predict the past. This makes your model look great in training but fail in production.
+
+**Bad (leaky)**:
+```python
+df['avg_points'] = df.groupby('name')['total_points'].transform('mean')
+# This uses ALL data including future games!
+```
+
+**Good (no leak)**:
+```python
+df['avg_points'] = df.groupby('name')['total_points'].transform(
+    lambda x: x.rolling(5).mean().shift(1)
+)
+# Only uses past data due to shift(1)
+```
+
+### Categorical Encoding
+
+ML models need numbers, not strings. We encode categories like position and team:
+
+```python
+# Position: GK -> 0, DEF -> 1, MID -> 2, FWD -> 3
+position_map = {'GKP': 0, 'GK': 0, 'DEF': 1, 'MID': 2, 'FWD': 3}
+df['position_encoded'] = df['position'].map(position_map)
+
+# Teams: Arsenal -> 0, Aston Villa -> 1, etc.
+df['team_encoded'] = df['team'].astype('category').cat.codes
+```
+
+---
+
+## 7.5 Run the Data Processor
+
+### Terminal Commands:
+
+```bash
+# Navigate to ml-service and activate virtual environment
+cd /home/atibhav/repos/fpl/ml-service
+source venv/bin/activate
+
+# Run the data processor
+python data/data_processor.py
+```
+
+### Expected Output:
+
+```
+==================================================
+FPL Data Processing Pipeline
+==================================================
+
+1. Loading historical data...
+  Loading 2022-23...
+    -> 26505 rows loaded
+  Loading 2023-24...
+    -> 29725 rows loaded
+  Loading 2024-25...
+    -> XXXX rows loaded (current season data)
+  Total: ~80000+ rows from 3 seasons
+
+2. Cleaning data...
+  Rows: ~80000+ -> (dropped missing) -> ~75000+ (dropped duplicates)
+
+3. Encoding features...
+
+4. Engineering features...
+
+5. Preparing training data...
+  Features: 12
+  Training samples: 76858
+
+✓ Saved processed data to: /home/atibhav/repos/fpl/ml-service/data/processed_data.csv
+
+==================================================
+Data processing complete!
+==================================================
+
+Dataset Summary:
+  Shape: (76858, 12)
+  Features: ['position_encoded', 'team_encoded', 'opponent_encoded', 'is_home', 
+             'value', 'last_3_avg_points', 'last_5_avg_points', 'avg_minutes', 
+             'goals_per_90', 'assists_per_90', 'month', 'day_of_week']
+
+Target (total_points) statistics:
+  Mean: 1.16
+  Std: 2.36
+  Min: -4, Max: 26
+```
+
+### Verify the Output:
+
+```bash
+# Check that processed_data.csv was created
+ls -lh /home/atibhav/repos/fpl/ml-service/data/processed_data.csv
+
+# Check the first few rows
+head -5 /home/atibhav/repos/fpl/ml-service/data/processed_data.csv
+
+# Check the file size (should be ~10-20MB)
+du -h /home/atibhav/repos/fpl/ml-service/data/processed_data.csv
+```
+
+---
+
+## 7.6 Understanding the Output Statistics
+
+The output tells us important things about our data:
+
+| Statistic | Value | Meaning |
+|-----------|-------|---------|
+| Mean: 1.16 | Average player scores ~1 point per gameweek | Most players score low (bench, subs, 0-min) |
+| Std: 2.36 | Standard deviation | High variance - some players score way more |
+| Min: -4 | Minimum points | Red card + own goal = negative points |
+| Max: 26 | Maximum points | Haaland 5 goals or Salah hat-trick with bonus |
+
+This distribution is **important**: most predictions will be around 1-3 points, but we need to capture the high scorers (6+ points) for FPL success.
+
+---
+
+## 7.7 Update .gitignore for Data Files
+
+The Vaastav dataset is ~500MB - we don't want it in Git. Add to `.gitignore`:
+
+```bash
+# Add to .gitignore
+echo "" >> /home/atibhav/repos/fpl/.gitignore
+echo "# Large data files" >> /home/atibhav/repos/fpl/.gitignore
+echo "ml-service/data/raw/" >> /home/atibhav/repos/fpl/.gitignore
+echo "ml-service/data/processed_data.csv" >> /home/atibhav/repos/fpl/.gitignore
+```
+
+### Full .gitignore After This Step:
+
+```gitignore
+# Node.js
+node_modules/
+
+# Python
+venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Java
+target/
+.idea/
+.gradle/
+*.iml
+*.ipr
+*.iws
+
+# IDEs
+.vscode/
+
+# Logs
+*.log
+
+# Large data files
+ml-service/data/raw/
+ml-service/data/processed_data.csv
+```
+
+---
+
+## 7.8 Project Structure After Step 7
+
+```
+fpl/
+├── .gitignore
+├── DEVELOPMENT.md
+├── plan.md
+├── client/                       # React frontend
+│   └── ...
+├── server/                       # Spring Boot backend
+│   └── ...
+└── ml-service/                   # FastAPI ML service
+    ├── main.py
+    ├── requirements.txt
+    ├── venv/                     # (not in Git)
+    ├── ml/
+    │   └── __init__.py
+    ├── optimization/
+    │   └── __init__.py
+    ├── data/
+    │   ├── __init__.py
+    │   ├── data_processor.py     # NEW: Data preprocessing pipeline
+    │   ├── processed_data.csv    # NEW: Processed training data (not in Git)
+    │   └── raw/                  # NEW: Vaastav dataset (not in Git)
+    │       └── Fantasy-Premier-League/
+    └── models/
+```
+
+---
+
+## 7.9 Next Steps
+
+With the data pipeline complete, we can now:
+
+1. **Train baseline Linear Regression model** → Establish performance baseline
+2. **Train advanced models** → Random Forest, SVR, Ensemble
+3. **Create prediction endpoint** → Connect models to FastAPI
+4. **Integrate with Spring Boot** → End-to-end predictions in the app
+
