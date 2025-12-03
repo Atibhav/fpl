@@ -393,14 +393,15 @@ Ready to implement! Follow the technical plan in the main plan document for step
   - Handles user data, saved squads, REST API
   - Spring Data JPA for database access
   - PostgreSQL database
-- **ML/Optimization Backend**: Flask (Python)
+- **ML/Optimization Backend**: FastAPI (Python)
+  - Modern async Python framework with automatic API docs
   - Separate microservice for ML predictions and PuLP optimization
-  - Only handles computationally heavy ML tasks
+  - Type validation with Pydantic, auto-generated Swagger UI
 - **Data**: Vaastav's FPL dataset (GitHub, free) + Official FPL API (free, no key required)
 - **Deployment** (All on Render.com):
   - Frontend (React): Render.com Static Site (free)
   - Java Backend: Render.com Web Service (free tier)
-  - Flask ML Service: Render.com Web Service (free tier) 
+  - FastAPI ML Service: Render.com Web Service (free tier) 
   - PostgreSQL: Render.com PostgreSQL (free tier, 1GB, 90-day expiry - can recreate)
 
 **All services are FREE on Render.com - single platform for everything**
@@ -415,7 +416,7 @@ Ready to implement! Follow the technical plan in the main plan document for step
                             │
                             ▼
                      ┌──────────────────┐
-                     │  Flask ML API    │
+                     │  FastAPI ML      │
                      │  (Predictions    │
                      │   + PuLP)        │
                      └──────────────────┘
@@ -425,9 +426,10 @@ Ready to implement! Follow the technical plan in the main plan document for step
 
 - React handles all UI/UX (squad builder, visualizations)
 - Spring Boot handles REST API, business logic, data persistence (saved squads)
-- Flask handles ONLY ML predictions and optimization (Python is better for ML libraries)
-- Spring Boot calls Flask internally when predictions needed via RestTemplate/WebClient
-- User never directly interacts with Flask
+- FastAPI handles ONLY ML predictions and optimization (Python is better for ML libraries)
+- Spring Boot calls FastAPI internally when predictions needed via RestTemplate/WebClient
+- User never directly interacts with FastAPI
+- FastAPI provides automatic Swagger docs at `/docs` for easy testing
 
 ## Phase 1: Project Setup
 
@@ -605,18 +607,24 @@ public class CorsConfig {
 }
 ```
 
-### 1.2 Flask ML Backend (`/ml-service`)
+### 1.2 FastAPI ML Backend (`/ml-service`)
 
-**Learning**: Flask basics, Python ML libraries
+**Learning**: FastAPI basics, Pydantic validation, Python ML libraries
 
-Initialize Flask app:
+**Why FastAPI over Flask?** (See DEVELOPMENT.md for full trade-off analysis)
+- Automatic Swagger docs at `/docs`
+- Type validation with Pydantic
+- Modern async Python
+- Better resume value in 2024
+
+Initialize FastAPI app:
 
 ```bash
 mkdir ml-service
 cd ml-service
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install flask flask-cors pandas numpy scikit-learn tensorflow pulp requests
+pip install fastapi uvicorn pandas numpy scikit-learn pulp requests
 pip freeze > requirements.txt
 ```
 
@@ -624,46 +632,62 @@ Project structure:
 
 ```
 /ml-service
-├── app.py                    # Flask entry point
+├── main.py                   # FastAPI entry point
 ├── requirements.txt
 ├── /ml
+│   ├── __init__.py
 │   ├── baseline_models.py    # Linear Regression
-│   ├── advanced_models.py    # Neural Net, Ensemble
+│   ├── advanced_models.py    # Random Forest, SVR, Ensemble
 │   ├── train_models.py       # Training pipeline
 │   └── predictor.py          # Prediction service
 ├── /optimization
+│   ├── __init__.py
 │   └── team_optimizer.py     # PuLP optimization
 ├── /data
+│   ├── __init__.py
 │   ├── data_processor.py     # Preprocessing
 │   └── /raw                  # Vaastav's dataset
 └── /models                   # Saved .pkl models
 ```
 
-**`app.py`** - Flask app:
+**`main.py`** - FastAPI app:
 
 ```python
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from ml.predictor import predict_players
-from optimization.team_optimizer import optimize_squad
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Dict, Optional
 
-app = Flask(__name__)
-CORS(app)
+app = FastAPI(
+    title="FPL ML Service",
+    docs_url="/docs"  # Swagger UI
+)
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    players = request.json['players']
-    predictions = predict_players(players)
-    return jsonify(predictions)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"])
 
-@app.route('/optimize/squad', methods=['POST'])
-def optimize():
-    data = request.json
-    result = optimize_squad(data['players'], data['budget'])
-    return jsonify(result)
+class PredictionRequest(BaseModel):
+    players: List[Dict]
 
-if __name__ == '__main__':
-    app.run(port=5001, debug=True)
+@app.get("/health")
+def health():
+    return {"status": "ok", "message": "FPL ML Service running!"}
+
+@app.post("/predict")
+def predict(request: PredictionRequest):
+    # Returns {player_id: predicted_points}
+    predictions = {}
+    for player in request.players:
+        predictions[str(player['id'])] = player.get('form', 0) * 1.5
+    return {"predictions": predictions}
+
+@app.post("/optimize/squad")
+def optimize(request: dict):
+    # PuLP optimization (see full implementation in codebase)
+    return {"squad": [], "total_cost": 0, "expected_points": 0}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=5001, reload=True)
 ```
 
 ### 1.3 Frontend Setup - React (`/frontend`)

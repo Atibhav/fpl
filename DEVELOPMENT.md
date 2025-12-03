@@ -2556,3 +2556,518 @@ client/src/
 └── styles/                   # (empty, for future use)
 ```
 
+---
+
+# Step 6: FastAPI ML Service Setup
+
+## 6.1 Why FastAPI? (Framework Trade-off Analysis)
+
+Before building the ML microservice, we evaluated three Python frameworks. Here's our analysis:
+
+### The Three Options
+
+| Framework | Description | Use Case |
+|-----------|-------------|----------|
+| **Flask** | Lightweight, minimal micro-framework | Simple APIs, beginners |
+| **Django** | Full-featured "batteries included" framework | Large web apps with ORM, auth |
+| **FastAPI** | Modern async framework with type hints | APIs, ML services |
+
+### Detailed Comparison
+
+| Aspect | Flask | FastAPI | Django |
+|--------|-------|---------|--------|
+| **Setup Complexity** | Minimal (~5 files) | Minimal (~5 files) | Heavy (~15+ files) |
+| **Auto API Docs** | Manual (add Swagger) | ✅ Built-in Swagger/ReDoc | Manual |
+| **Type Validation** | Manual | ✅ Pydantic (automatic) | Manual |
+| **Async Support** | Add-on | ✅ Native | Limited |
+| **Performance** | Good | ⚡ Fastest Python framework | Good |
+| **Learning Curve** | Easiest | Easy-Medium | Steepest |
+| **ML/AI Popularity** | Common | 🔥 Very popular (growing) | Less common |
+| **Resume Value (2024)** | Good | 🔥 Excellent | Good |
+
+### Why We Chose FastAPI
+
+1. **Automatic API Documentation**
+   - Visit `/docs` → Interactive Swagger UI for free
+   - Great for demos and portfolio showcases
+   - No manual documentation needed
+
+2. **Type Validation with Pydantic**
+   - Define request/response models once
+   - Automatic validation (wrong types = 422 error with clear message)
+   - IDE autocomplete works perfectly
+
+3. **Modern Python**
+   - Shows you know async/await, type hints
+   - Industry-standard for ML APIs (OpenAI, Uber, Netflix use it)
+
+4. **Performance**
+   - Important when processing 600+ players
+   - Async support for concurrent requests
+
+5. **Resume Value**
+   - FastAPI is the "hot" framework in 2024
+   - Shows modern Python skills
+
+### Why NOT Flask?
+
+Flask would work fine, but:
+- No built-in API docs (need swagger-ui manually)
+- No automatic request validation
+- Synchronous by default
+- Less impressive on resume in 2024
+
+### Why NOT Django?
+
+Django is overkill because:
+- We already have Spring Boot handling database (PostgreSQL + JPA)
+- We don't need Django's ORM, admin panel, or authentication
+- More boilerplate code for a simple ML API
+- Slower cold starts on free hosting
+
+---
+
+## 6.2 FastAPI Project Structure
+
+```
+ml-service/
+├── main.py                      # FastAPI entry point
+├── requirements.txt             # Python dependencies
+├── venv/                        # Virtual environment (NOT committed to Git)
+├── ml/                          # ML models and prediction logic
+│   ├── __init__.py
+│   └── predictor.py             # Prediction functions
+├── optimization/                # PuLP squad optimization
+│   ├── __init__.py
+│   └── team_optimizer.py        # Optimization functions
+├── data/                        # Data processing
+│   ├── __init__.py
+│   └── raw/                     # Vaastav dataset (will be downloaded)
+└── models/                      # Saved ML model files (.pkl, .h5)
+```
+
+---
+
+## 6.3 Setting Up the FastAPI Service
+
+### Step 1: Create Directory Structure
+
+```bash
+cd /home/atibhav/repos/fpl/ml-service
+mkdir -p ml optimization data data/raw models
+```
+
+### Step 2: Create `requirements.txt`
+
+```text
+# FastAPI and server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# ML libraries
+pandas==2.1.4
+numpy==1.26.3
+scikit-learn==1.4.0
+joblib==1.3.2
+
+# Optimization
+pulp==2.7.0
+
+# HTTP requests (for fetching external data)
+requests==2.31.0
+
+# For production deployment
+gunicorn==21.2.0
+```
+
+**What Each Package Does:**
+
+| Package | Purpose |
+|---------|---------|
+| `fastapi` | The web framework |
+| `uvicorn` | ASGI server to run FastAPI |
+| `pandas` | Data manipulation (DataFrames) |
+| `numpy` | Numerical operations |
+| `scikit-learn` | ML algorithms (LinearRegression, RandomForest, SVR) |
+| `joblib` | Save/load trained models |
+| `pulp` | Linear Programming for optimization |
+| `requests` | HTTP client for external APIs |
+| `gunicorn` | Production-grade WSGI server |
+
+### Step 3: Create Python Virtual Environment
+
+```bash
+cd /home/atibhav/repos/fpl/ml-service
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+**Why Virtual Environment?**
+- Isolates project dependencies from system Python
+- Prevents version conflicts between projects
+- The `venv/` folder contains ~10,000+ files — that's why we add it to `.gitignore`
+
+---
+
+## 6.4 Main FastAPI Application (`main.py`)
+
+```python
+"""
+FPL ML Service - FastAPI Application
+
+This is the main entry point for the ML microservice.
+It handles:
+1. Player points predictions using trained ML models
+2. Squad optimization using PuLP linear programming
+
+The Spring Boot backend calls this service internally.
+Users never interact with this directly.
+"""
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Dict, Optional
+import uvicorn
+
+# =============================================================================
+# PYDANTIC MODELS (Request/Response Schemas)
+# =============================================================================
+# Pydantic models define the shape of data coming in and going out.
+# FastAPI uses these for:
+# 1. Automatic validation (wrong types = 422 error)
+# 2. Auto-generated API documentation
+# 3. IDE autocomplete support
+
+class PlayerFeatures(BaseModel):
+    """Features for a single player prediction"""
+    id: int
+    name: str
+    position: str  # GK, DEF, MID, FWD
+    team: str
+    price: float
+    form: Optional[float] = 0.0
+    total_points: Optional[int] = 0
+    minutes: Optional[int] = 0
+    goals_scored: Optional[int] = 0
+    assists: Optional[int] = 0
+    clean_sheets: Optional[int] = 0
+
+
+class PredictionRequest(BaseModel):
+    """Request body for /predict endpoint"""
+    players: List[PlayerFeatures]
+
+
+class PredictionResponse(BaseModel):
+    """Response from /predict endpoint"""
+    predictions: Dict[str, float]  # {player_id: predicted_points}
+
+
+class OptimizeRequest(BaseModel):
+    """Request body for /optimize/squad endpoint"""
+    players: List[Dict]  # Players with predicted_points
+    budget: float = 100.0
+
+
+class OptimizeResponse(BaseModel):
+    """Response from /optimize/squad endpoint"""
+    squad: List[Dict]
+    total_cost: float
+    expected_points: float
+    status: str
+
+
+class HealthResponse(BaseModel):
+    """Response from /health endpoint"""
+    status: str
+    message: str
+    version: str
+
+
+# =============================================================================
+# FASTAPI APP INITIALIZATION
+# =============================================================================
+
+app = FastAPI(
+    title="FPL ML Service",
+    description="Machine Learning predictions and squad optimization for Fantasy Premier League",
+    version="1.0.0",
+    docs_url="/docs",      # Swagger UI at /docs
+    redoc_url="/redoc"     # ReDoc at /redoc
+)
+
+# CORS Configuration
+# Allows Spring Boot backend to call this service
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, restrict to your backend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# =============================================================================
+# API ENDPOINTS
+# =============================================================================
+
+@app.get("/health", response_model=HealthResponse)
+def health_check():
+    """
+    Health check endpoint.
+    
+    Used by:
+    - Spring Boot to verify ML service is running
+    - Render.com for health monitoring
+    - Manual testing
+    """
+    return HealthResponse(
+        status="ok",
+        message="FPL ML Service is running!",
+        version="1.0.0"
+    )
+
+
+@app.post("/predict", response_model=PredictionResponse)
+def predict_points(request: PredictionRequest):
+    """
+    Predict points for a list of players.
+    
+    This endpoint:
+    1. Receives player data from Spring Boot
+    2. Extracts features for each player
+    3. Runs predictions through trained ML models
+    4. Returns predicted points per player
+    
+    For now, returns dummy predictions (form * 1.5).
+    Will be replaced with actual ML model predictions.
+    """
+    predictions = {}
+    
+    for player in request.players:
+        # PLACEHOLDER: Simple prediction based on form
+        # TODO: Replace with actual ML model prediction
+        predicted = float(player.form) * 1.5 if player.form else 2.0
+        predictions[str(player.id)] = round(predicted, 1)
+    
+    return PredictionResponse(predictions=predictions)
+
+
+@app.post("/optimize/squad", response_model=OptimizeResponse)
+def optimize_squad(request: OptimizeRequest):
+    """
+    Optimize squad selection using Linear Programming.
+    
+    This endpoint:
+    1. Receives all players with predicted points
+    2. Uses PuLP to solve the optimization problem
+    3. Returns the optimal 15-player squad
+    
+    Constraints:
+    - Exactly 15 players
+    - Budget limit (default £100m)
+    - 2 GK, 5 DEF, 5 MID, 3 FWD
+    - Max 3 players per team
+    
+    For now, returns a simple sorted selection.
+    TODO: Implement full PuLP optimization.
+    """
+    # Placeholder implementation - will be replaced with PuLP
+    players = request.players
+    budget = request.budget
+    
+    # ... (simplified greedy selection)
+    
+    return OptimizeResponse(
+        squad=selected,
+        total_cost=round(total_cost, 1),
+        expected_points=round(expected_points, 1),
+        status="Optimal" if len(selected) == 15 else "Partial"
+    )
+
+
+# =============================================================================
+# MAIN ENTRY POINT
+# =============================================================================
+
+if __name__ == "__main__":
+    # Run with: python main.py
+    # Or: uvicorn main:app --reload --port 5001
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=5001,
+        reload=True  # Auto-reload on code changes (dev only)
+    )
+```
+
+---
+
+## 6.5 Key FastAPI Concepts
+
+### Pydantic Models
+
+Pydantic is FastAPI's secret weapon. Define your data once:
+
+```python
+class PlayerFeatures(BaseModel):
+    id: int                           # Required, must be integer
+    name: str                         # Required, must be string
+    position: str                     # Required, must be string
+    form: Optional[float] = 0.0       # Optional, defaults to 0.0
+```
+
+**What Pydantic Gives You:**
+1. **Validation**: Wrong types automatically return 422 error
+2. **Documentation**: Shows up in Swagger UI
+3. **Type Hints**: IDE autocomplete works perfectly
+4. **Serialization**: Converts to/from JSON automatically
+
+### Decorators for Endpoints
+
+```python
+@app.get("/health")           # HTTP GET request to /health
+@app.post("/predict")         # HTTP POST request to /predict
+@app.put("/update")           # HTTP PUT request to /update
+@app.delete("/remove")        # HTTP DELETE request to /remove
+```
+
+### Response Models
+
+```python
+@app.get("/health", response_model=HealthResponse)
+def health_check():
+    return HealthResponse(...)  # Must match the model
+```
+
+- `response_model` tells FastAPI what shape the response should be
+- Automatic validation of your response
+- Generates correct API documentation
+
+### Path Parameters vs Query Parameters
+
+```python
+# Path parameter: /players/123
+@app.get("/players/{player_id}")
+def get_player(player_id: int):
+    ...
+
+# Query parameter: /players?position=FWD
+@app.get("/players")
+def get_players(position: Optional[str] = None):
+    ...
+```
+
+---
+
+## 6.6 Running the FastAPI Service
+
+### Start the Server
+
+```bash
+cd /home/atibhav/repos/fpl/ml-service
+source venv/bin/activate
+python main.py
+```
+
+Or using uvicorn directly:
+
+```bash
+uvicorn main:app --reload --port 5001
+```
+
+### Test the Endpoints
+
+**Health Check:**
+```bash
+curl http://localhost:5001/health
+```
+
+Expected response:
+```json
+{
+  "status": "ok",
+  "message": "FPL ML Service is running!",
+  "version": "1.0.0"
+}
+```
+
+**Swagger UI (Interactive Docs):**
+Open in browser: `http://localhost:5001/docs`
+
+This gives you:
+- Interactive API documentation
+- Try endpoints directly from browser
+- See request/response schemas
+- Great for demos!
+
+---
+
+## 6.7 Important: `.gitignore` for Python
+
+The `venv/` folder contains ~10,000+ package files. **NEVER commit it to Git.**
+
+Our `.gitignore` includes:
+
+```gitignore
+# Python virtual environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# ML model files (can be large)
+*.pkl
+*.h5
+```
+
+**Why?**
+- `venv/` can be regenerated with `pip install -r requirements.txt`
+- It's platform-specific (Linux vs Mac vs Windows)
+- It's huge (~400MB+)
+
+---
+
+## 6.8 Project Structure After Step 6
+
+```
+fpl/
+├── .gitignore                    # Ignores venv, node_modules, etc.
+├── DEVELOPMENT.md                # This guide
+├── plan.md                       # Project plan
+├── client/                       # React frontend
+│   └── ...
+├── server/                       # Spring Boot backend
+│   └── ...
+└── ml-service/                   # NEW: FastAPI ML service
+    ├── main.py                   # FastAPI app with endpoints
+    ├── requirements.txt          # Python dependencies
+    ├── venv/                     # Virtual environment (NOT in Git)
+    ├── ml/
+    │   ├── __init__.py
+    │   └── predictor.py          # Prediction placeholder
+    ├── optimization/
+    │   ├── __init__.py
+    │   └── team_optimizer.py     # Optimization placeholder
+    ├── data/
+    │   ├── __init__.py
+    │   └── raw/                  # For Vaastav dataset
+    └── models/                   # For saved .pkl models
+```
+
+---
+
+## 6.9 Next Steps
+
+Now that FastAPI is set up with placeholder endpoints, we need to:
+
+1. **Download Vaastav FPL dataset** → Real historical data
+2. **Create data preprocessing pipeline** → Clean and engineer features
+3. **Train Linear Regression baseline** → First real ML model
+4. **Connect Spring Boot to FastAPI** → End-to-end predictions
+
