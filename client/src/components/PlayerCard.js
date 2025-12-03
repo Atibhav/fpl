@@ -15,6 +15,9 @@ function PlayerCard({ player, onSelect, isSelected }) {
     'FWD': '#e90052'
   };
 
+  const predictedPoints = player.predicted_points ?? 0;
+  const hasPrediction = player.predicted_points != null && player.predicted_points > 0;
+
   return (
     <div 
       className={`player-card ${isSelected ? 'selected' : ''}`}
@@ -35,27 +38,27 @@ function PlayerCard({ player, onSelect, isSelected }) {
       <div className="player-stats">
         <div className="stat">
           <span className="stat-label">Price</span>
-          <span className="stat-value">£{player.price}m</span>
+          <span className="stat-value">£{player.price?.toFixed(1) || '?'}m</span>
         </div>
         <div className="stat">
           <span className="stat-label">Points</span>
-          <span className="stat-value">{player.total_points}</span>
+          <span className="stat-value">{player.total_points || 0}</span>
         </div>
         <div className="stat">
           <span className="stat-label">Form</span>
-          <span className="stat-value">{player.form}</span>
+          <span className="stat-value">{player.form || '-'}</span>
         </div>
       </div>
       
       <div 
-        className="predicted-points"
-        style={{ color: getColorByPoints(player.predicted_points) }}
+        className={`predicted-points ${hasPrediction ? '' : 'no-prediction'}`}
+        style={{ color: hasPrediction ? getColorByPoints(predictedPoints) : '#666' }}
+        title={hasPrediction ? 'ML-predicted points for next gameweek' : 'No prediction available'}
       >
-        {player.predicted_points.toFixed(1)} xPts
+        {predictedPoints.toFixed(1)} xPts
       </div>
     </div>
   );
 }
 
 export default PlayerCard;
-

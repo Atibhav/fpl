@@ -76,7 +76,33 @@
 .predicted-points {
   font-size: 1rem;
   font-weight: 700;
-  min-width: 60px;
+  min-width: 70px;
   text-align: right;
+  transition: color 0.2s ease;
+}
+
+.predicted-points.no-prediction {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+/* Responsive: Stack on smaller screens */
+@media (max-width: 600px) {
+  .player-card {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  
+  .player-stats {
+    width: 100%;
+    justify-content: space-around;
+  }
+  
+  .predicted-points {
+    width: 100%;
+    text-align: center;
+    padding-top: 8px;
+    border-top: 1px solid #2a3a5e;
+  }
 }
 

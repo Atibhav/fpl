@@ -14,6 +14,9 @@ public class PlayerService {
     @Autowired
     private FplApiService fplApiService;
     
+    @Autowired
+    private MLServiceClient mlServiceClient;
+    
     public List<Map<String, Object>> getAllPlayersEnriched() {
         List<Map<String, Object>> players = fplApiService.getAllPlayers();
         List<Map<String, Object>> teams = fplApiService.getAllTeams();
@@ -31,7 +34,7 @@ public class PlayerService {
                         e -> (String) e.get("singular_name_short")
                 ));
         
-        return players.stream()
+        List<Map<String, Object>> enrichedPlayers = players.stream()
                 .map(player -> {
                     Map<String, Object> enriched = new HashMap<>(player);
                     
@@ -55,6 +58,21 @@ public class PlayerService {
                     return enriched;
                 })
                 .collect(Collectors.toList());
+        
+        try {
+            Map<String, Double> predictions = mlServiceClient.getPredictions(players);
+            
+            if (!predictions.isEmpty()) {
+                enrichedPlayers = enrichPlayersWithPredictions(enrichedPlayers, predictions);
+                System.out.println("Successfully added predictions for " + predictions.size() + " players");
+            } else {
+                System.out.println("Warning: ML service returned empty predictions");
+            }
+        } catch (Exception e) {
+            System.err.println("Warning: Could not get ML predictions: " + e.getMessage());
+        }
+        
+        return enrichedPlayers;
     }
     
     public List<Map<String, Object>> enrichPlayersWithPredictions(
@@ -72,4 +90,3 @@ public class PlayerService {
                 .collect(Collectors.toList());
     }
 }
-

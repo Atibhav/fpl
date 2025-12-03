@@ -5009,31 +5009,304 @@ fpl/
 
 ---
 
-## 9.10 Next Steps
+## 9.10 Connecting Spring Boot to FastAPI
 
-With the ML prediction service working, the next tasks are:
+Now we connect the Spring Boot backend to our ML service so React gets predictions with player data.
 
-1. **Connect Spring Boot → FastAPI**: Create `MLServiceClient` to call `/predict`
-2. **Show predictions in React**: Display predicted points on PlayerCards
-3. **Train advanced models**: Random Forest, SVR, Ensemble (to beat baseline)
-4. **Implement PuLP optimization**: Auto-select optimal squad
+### 9.10.1 Create MLServiceClient.java
+
+This service class handles communication with FastAPI:
+
+```java
+// server/src/main/java/com/fpl/server/service/MLServiceClient.java
+
+package com.fpl.server.service;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Client service for communicating with the FastAPI ML Service.
+ * Uses RestTemplate to make HTTP requests to the ML microservice.
+ */
+@Service
+public class MLServiceClient {
+    
+    // Read ML service URL from application.properties
+    // Default: http://localhost:5001
+    @Value("${ml.service.url}")
+    private String mlServiceUrl;
+    
+    // RestTemplate is Spring's HTTP client
+    // It handles JSON serialization/deserialization automatically
+    private final RestTemplate restTemplate = new RestTemplate();
+    
+    /**
+     * Get predictions for a list of players.
+     * 
+     * Calls POST /predict on the ML service with player data.
+     * Returns a map of player_id -> predicted_points.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Double> getPredictions(List<Map<String, Object>> players) {
+        String url = mlServiceUrl + "/predict";
+        
+        try {
+            // Create request headers (JSON content type)
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            
+            // Create request body with players list
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("players", players);
+            
+            // HttpEntity combines headers + body
+            HttpEntity<Map<String, Object>> request = 
+                new HttpEntity<>(requestBody, headers);
+            
+            // POST to ML service
+            Map<String, Object> response = 
+                restTemplate.postForObject(url, request, Map.class);
+            
+            // Extract predictions from response
+            if (response != null && response.containsKey("predictions")) {
+                Map<String, Object> predictions = 
+                    (Map<String, Object>) response.get("predictions");
+                
+                // Convert Number values to Double
+                Map<String, Double> result = new HashMap<>();
+                for (Map.Entry<String, Object> entry : predictions.entrySet()) {
+                    Object value = entry.getValue();
+                    if (value instanceof Number) {
+                        result.put(entry.getKey(), ((Number) value).doubleValue());
+                    }
+                }
+                return result;
+            }
+            
+            return new HashMap<>();
+            
+        } catch (Exception e) {
+            // If ML service is down, return empty (graceful degradation)
+            System.err.println("ML Service error: " + e.getMessage());
+            return new HashMap<>();
+        }
+    }
+    
+    /**
+     * Check if ML service is healthy.
+     */
+    public boolean isHealthy() {
+        try {
+            Map<String, Object> response = 
+                restTemplate.getForObject(mlServiceUrl + "/health", Map.class);
+            return response != null && "ok".equals(response.get("status"));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+}
+```
+
+**Key Concepts:**
+- **@Value annotation**: Injects values from `application.properties`
+- **RestTemplate**: Spring's HTTP client for REST API calls
+- **HttpEntity**: Combines headers and body for requests
+- **Graceful degradation**: Returns empty predictions if ML service is down
+
+### 9.10.2 Update PlayerService to Use ML Predictions
+
+Modify `PlayerService.java` to call the ML service:
+
+```java
+// In PlayerService.java
+
+@Autowired
+private MLServiceClient mlServiceClient;  // Add this
+
+public List<Map<String, Object>> getAllPlayersEnriched() {
+    // ... existing code to enrich with team names and positions ...
+    
+    // NEW: Get ML predictions and merge them
+    try {
+        Map<String, Double> predictions = mlServiceClient.getPredictions(players);
+        
+        if (!predictions.isEmpty()) {
+            enrichedPlayers = enrichPlayersWithPredictions(enrichedPlayers, predictions);
+            System.out.println("Successfully added predictions for " + predictions.size() + " players");
+        } else {
+            System.out.println("Warning: ML service returned empty predictions");
+        }
+    } catch (Exception e) {
+        System.err.println("Warning: Could not get ML predictions: " + e.getMessage());
+        // Continue with default predictions (0.0)
+    }
+    
+    return enrichedPlayers;
+}
+```
+
+### 9.10.3 Bug Fix: Invalid Player ID Handling
+
+**Issue Found:** When a player dict has `id: None`, the code was converting it to the string `'None'` instead of skipping it.
+
+**Root Cause:** The check `if not player_id` only catches empty strings, not the literal `None` that becomes `'None'` after `str()` conversion.
+
+**Fix in predictor.py:**
+
+```python
+def predict_batch(self, players: List[Dict[str, Any]]) -> Dict[str, float]:
+    predictions = {}
+    
+    for player in players:
+        player_id = player.get('id')
+        
+        # Skip players with invalid IDs (None, empty, or non-numeric)
+        if player_id is None:  # First check for None
+            continue
+        
+        # Convert to string and validate
+        player_id_str = str(player_id)
+        if not player_id_str or player_id_str == 'None':  # Catch edge cases
+            continue
+        
+        predicted_points = self.predict_single(player)
+        predictions[player_id_str] = predicted_points
+    
+    return predictions
+```
+
+**Why This Matters:**
+- Bad ID values (`None`, missing) could pollute the predictions response
+- The key `'None'` would be invalid for lookup in the frontend
+- Skipping invalid players ensures clean data flow
+
+### 9.10.4 Update React PlayerCard to Display Predictions
+
+The `PlayerCard` component already had a placeholder for predictions. We enhanced it to:
+- Handle null/undefined predictions gracefully
+- Color-code predictions (green/yellow/red based on expected points)
+- Show a visual indicator when no prediction is available
+- Be responsive on mobile devices
+
+```javascript
+// client/src/components/PlayerCard.js
+
+// Safely get predicted points (handle null/undefined)
+const predictedPoints = player.predicted_points ?? 0;
+const hasPrediction = player.predicted_points != null && player.predicted_points > 0;
+
+// ...
+
+<div 
+  className={`predicted-points ${hasPrediction ? '' : 'no-prediction'}`}
+  style={{ color: hasPrediction ? getColorByPoints(predictedPoints) : '#666' }}
+  title={hasPrediction ? 'ML-predicted points' : 'No prediction available'}
+>
+  {predictedPoints.toFixed(1)} xPts
+</div>
+```
+
+**Color Coding:**
+- **Green (#00ff87)**: 6+ points expected (high value picks)
+- **Yellow (#ffc107)**: 4-6 points expected (medium value)
+- **Red (#ff5252)**: <4 points expected (low value)
 
 ---
 
-## 9.11 Commit Progress
+## 9.11 Testing the Integration
+
+### Start All Services
+
+```bash
+# Terminal 1: Spring Boot
+cd /home/atibhav/repos/fpl/server
+./mvnw spring-boot:run
+
+# Terminal 2: FastAPI
+cd /home/atibhav/repos/fpl/ml-service
+source venv/bin/activate
+python main.py
+
+# Terminal 3: React
+cd /home/atibhav/repos/fpl/client
+npm start
+```
+
+### Test the Flow
+
+```bash
+# Check ML service health
+curl http://localhost:5001/health
+
+# Check Spring Boot health
+curl http://localhost:8080/api/health
+
+# Get players WITH predictions (the integration test)
+curl http://localhost:8080/api/players | jq '.[0:3]'
+```
+
+The `/api/players` endpoint now returns players with `predicted_points` filled in by our ML model!
+
+---
+
+## 9.12 Current Architecture Flow
+
+```
+┌──────────────────┐     ┌────────────────────┐     ┌─────────────────┐
+│   React Client   │────▶│   Spring Boot      │────▶│   FPL API       │
+│   (port 3000)    │     │   (port 8080)      │     │   (external)    │
+└──────────────────┘     └────────────────────┘     └─────────────────┘
+                                  │
+                                  │ POST /predict
+                                  ▼
+                         ┌────────────────────┐     ┌─────────────────┐
+                         │   FastAPI ML       │────▶│  FPL-Elo-       │
+                         │   (port 5001)      │     │  Insights data  │
+                         └────────────────────┘     └─────────────────┘
+```
+
+**Data Flow:**
+1. React calls Spring Boot `/api/players`
+2. Spring Boot fetches live data from FPL API
+3. Spring Boot calls FastAPI `/predict` with player data
+4. FastAPI uses hybrid approach:
+   - Historical rolling averages from FPL-Elo-Insights
+   - Live form/price/ownership from FPL API
+5. FastAPI returns predictions
+6. Spring Boot merges predictions into player data
+7. React receives enriched player data with `predicted_points`
+
+---
+
+## 9.13 Next Steps
+
+1. **Display predictions in React**: Update `PlayerCard` to show predicted points
+2. **Train advanced models**: Random Forest, SVR, Ensemble
+3. **Implement PuLP optimization**: Auto-select optimal squad
+4. **PostgreSQL integration**: Save/load user squads
+
+---
+
+## 9.14 Commit Progress
 
 ```bash
 cd /home/atibhav/repos/fpl
 git add .
 git status
-git commit -m "feat(ml): Add baseline Linear Regression model with hybrid prediction
+git commit -m "feat: Connect Spring Boot to FastAPI ML service
 
-- Trained Linear Regression achieving R²=0.732, RMSE=1.26
-- Created hybrid predictor combining FPL-Elo-Insights + FPL API data
-- Auto-update dataset on service startup (git pull)
-- Pre-compute rolling stats for 756 players
-- New endpoints: /health, /predict, /player/{id}/stats
-- Ridge regression variants for comparison"
+- Create MLServiceClient for Spring Boot -> FastAPI communication
+- Update PlayerService to fetch and merge ML predictions
+- Fix invalid player ID handling in predictor (None -> 'None' bug)
+- Add graceful degradation when ML service unavailable"
 
 git push origin main
 ```
