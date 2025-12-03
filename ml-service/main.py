@@ -13,8 +13,11 @@ Users never interact with this directly.
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import uvicorn
+
+# Import our ML predictor
+from ml.predictor import predict_players, get_predictor
 
 # =============================================================================
 # PYDANTIC MODELS (Request/Response Schemas)
@@ -42,7 +45,7 @@ class PlayerFeatures(BaseModel):
 
 class PredictionRequest(BaseModel):
     """Request body for /predict endpoint"""
-    players: List[PlayerFeatures]
+    players: List[Dict[str, Any]]  # Accept raw FPL API format
 
 
 class PredictionResponse(BaseModel):
@@ -98,6 +101,23 @@ app.add_middleware(
 # API ENDPOINTS
 # =============================================================================
 
+@app.on_event("startup")
+async def startup_event():
+    """
+    Initialize the ML predictor on startup.
+    
+    This loads:
+    - The trained Linear Regression model
+    - Historical player data from FPL-Elo-Insights
+    - Calculates rolling stats for all players
+    
+    Loading on startup means predictions are fast.
+    """
+    print("🚀 Starting FPL ML Service...")
+    predictor = get_predictor()  # Initialize and load data
+    print(f"✓ Service ready with {len(predictor.player_history)} players loaded")
+
+
 @app.get("/health", response_model=HealthResponse)
 def health_check():
     """
@@ -108,9 +128,13 @@ def health_check():
     - Render.com for health monitoring
     - Manual testing
     """
+    predictor = get_predictor()
+    player_count = len(predictor.player_history)
+    model_loaded = predictor.model is not None
+    
     return HealthResponse(
         status="ok",
-        message="FPL ML Service is running!",
+        message=f"FPL ML Service running! Model: {'loaded' if model_loaded else 'not loaded'}, Players: {player_count}",
         version="1.0.0"
     )
 
@@ -121,23 +145,50 @@ def predict_points(request: PredictionRequest):
     Predict points for a list of players.
     
     This endpoint:
-    1. Receives player data from Spring Boot
-    2. Extracts features for each player
-    3. Runs predictions through trained ML models
+    1. Receives player data from Spring Boot (FPL API format)
+    2. Uses HYBRID approach:
+       - Historical rolling stats from FPL-Elo-Insights dataset
+       - Live data (form, price, ownership) from FPL API
+    3. Runs predictions through trained Linear Regression model
     4. Returns predicted points per player
     
-    For now, returns dummy predictions (form * 1.5).
-    Will be replaced with actual ML model predictions.
+    The model was trained on actual gameweek data with features:
+    - last_6_avg_points: Rolling average of last 6 games
+    - last_3_avg_points: Rolling average of last 3 games  
+    - form_trend: Difference between recent and older form
+    - last_6_avg_minutes: Average minutes played
+    - form: FPL's form rating
+    - now_cost: Current price
+    - selected_by_percent: Ownership percentage
     """
-    predictions = {}
+    try:
+        predictions = predict_players(request.players)
+        return PredictionResponse(predictions=predictions)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/player/{player_id}/stats")
+def get_player_stats(player_id: int):
+    """
+    Get historical stats for a specific player.
     
-    for player in request.players:
-        # PLACEHOLDER: Simple prediction based on form
-        # TODO: Replace with actual ML model prediction
-        predicted = float(player.form) * 1.5 if player.form else 2.0
-        predictions[str(player.id)] = round(predicted, 1)
+    Returns the calculated rolling averages used for prediction.
+    Useful for debugging and understanding predictions.
+    """
+    predictor = get_predictor()
+    stats = predictor.get_player_stats(player_id)
     
-    return PredictionResponse(predictions=predictions)
+    if not stats:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Player {player_id} not found in historical data"
+        )
+    
+    return {
+        "player_id": player_id,
+        "stats": stats
+    }
 
 
 @app.post("/optimize/squad", response_model=OptimizeResponse)

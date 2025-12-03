@@ -4413,3 +4413,628 @@ git commit -m "feat(ml): Switch to FPL-Elo-Insights dataset with Elo ratings
 git push origin main
 ```
 
+---
+
+# Step 8: Training the Baseline ML Model
+
+Now that our data pipeline is ready, we train our first ML model: **Linear Regression**.
+
+## 8.1 Why Start with Linear Regression?
+
+Linear Regression is our **baseline model** - the simplest model that establishes a performance benchmark.
+
+**University Concepts Applied:**
+- **Supervised Learning**: We have labeled data (X features → y target)
+- **Regression**: Predicting a continuous value (points)
+- **Train/Test Split**: Evaluate on unseen data
+- **Model Evaluation**: RMSE, MAE, R² metrics
+
+| Reason | Explanation |
+|--------|-------------|
+| **Simple & Interpretable** | Coefficients tell us exactly how each feature affects predictions |
+| **Fast Training** | Trains in milliseconds even on 10K+ samples |
+| **Baseline Benchmark** | If fancy models don't beat this, they're not worth the complexity |
+| **Feature Importance** | Coefficient magnitude shows which features matter most |
+
+## 8.2 The Math Behind Linear Regression
+
+**Formula:**
+```
+ŷ = β₀ + β₁x₁ + β₂x₂ + ... + βₙxₙ
+```
+
+Where:
+- `ŷ` = predicted points for next gameweek
+- `β₀` = intercept (bias term)
+- `β₁...βₙ` = coefficients (weights) for each feature
+- `x₁...xₙ` = feature values
+
+**How it learns:**
+The model finds coefficients that minimize the **sum of squared errors**:
+```
+Loss = Σ(actual - predicted)²
+```
+
+This is called **Ordinary Least Squares (OLS)**.
+
+## 8.3 Creating the Baseline Model Module
+
+**File:** `ml-service/ml/baseline_models.py`
+
+```python
+"""
+Baseline ML Models for FPL Points Prediction
+=============================================
+This module implements the baseline Linear Regression model.
+
+University Concepts Used:
+- Supervised Learning (Regression)
+- Train/Test Split
+- Model Evaluation Metrics (RMSE, MAE, R²)
+"""
+
+import numpy as np
+import pandas as pd
+import joblib
+from pathlib import Path
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.preprocessing import StandardScaler
+
+
+# Path to save trained models
+MODELS_PATH = Path(__file__).parent.parent / "models"
+MODELS_PATH.mkdir(exist_ok=True)
+
+
+def train_linear_regression(X, y, model_name='linear_regression'):
+    """
+    Train a Linear Regression model.
+    
+    Args:
+        X: Feature DataFrame
+        y: Target Series
+        model_name: Name for saving the model
+    
+    Returns:
+        tuple: (model, metrics_dict)
+    """
+    # Split data: 70% training, 30% testing
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.3, random_state=42
+    )
+    
+    # Create and train the model
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+    
+    # Make predictions on test set
+    y_pred = model.predict(X_test)
+    
+    # Calculate evaluation metrics
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    mae = mean_absolute_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
+    
+    # Cross-validation for more robust evaluation
+    cv_scores = cross_val_score(model, X, y, cv=5, scoring='neg_mean_squared_error')
+    cv_rmse = np.sqrt(-cv_scores.mean())
+    
+    # Save the model
+    model_path = MODELS_PATH / f"{model_name}.pkl"
+    joblib.dump(model, model_path)
+    
+    return model, {'rmse': rmse, 'mae': mae, 'r2': r2, 'cv_rmse': cv_rmse}
+```
+
+### Understanding the Code:
+
+| Code | What It Does | Why |
+|------|-------------|-----|
+| `train_test_split(test_size=0.3)` | Holds 30% of data for testing | Evaluate on unseen data to check generalization |
+| `random_state=42` | Fixed random seed | Reproducibility - same split every run |
+| `model.fit(X_train, y_train)` | Trains the model | Finds optimal coefficients |
+| `model.predict(X_test)` | Makes predictions | Uses learned coefficients |
+| `cross_val_score(cv=5)` | 5-fold cross-validation | More robust evaluation than single split |
+| `joblib.dump()` | Saves model to disk | Reuse without retraining |
+
+## 8.4 Understanding Evaluation Metrics
+
+| Metric | Formula | Interpretation |
+|--------|---------|----------------|
+| **RMSE** | √(Σ(actual-pred)²/n) | Average error in points (same units as target) |
+| **MAE** | Σ\|actual-pred\|/n | Average absolute error (less sensitive to outliers) |
+| **R²** | 1 - (SS_res/SS_tot) | Proportion of variance explained (0-1, higher=better) |
+| **CV RMSE** | Average RMSE across 5 folds | More reliable estimate of true error |
+
+**Our Results:**
+```
+RMSE: 1.262 (average prediction error of ~1.3 points)
+MAE: 0.677 (average absolute error of ~0.7 points)
+R²: 0.732 (73.2% of variance explained)
+CV RMSE: 1.238 (robust estimate across 5 folds)
+```
+
+**Is 73% R² good?**
+- For FPL prediction, this is **quite good**!
+- FPL points are inherently noisy (luck, referee decisions, etc.)
+- Capturing 73% of the pattern is strong for such a stochastic outcome
+
+## 8.5 Feature Importance (Coefficients)
+
+The trained model's coefficients tell us which features matter most:
+
+```
+--- Feature Importance (Coefficients) ---
+  last_6_avg_points: -0.3186
+  last_3_avg_points: -0.6711
+  form_trend: -0.3526
+  last_6_avg_minutes: 0.0147
+  form: 1.5845          ← Most important!
+  now_cost: 0.0074
+  selected_by_percent: 0.0078
+  Intercept: 0.0090
+```
+
+**Interpretation:**
+- `form` (FPL's form rating) has the largest coefficient → most predictive
+- Rolling averages have negative coefficients because `form` already captures recent performance
+- `now_cost` and `selected_by_percent` have small positive effects
+
+### Terminal Commands - Training the Model:
+
+```bash
+# Activate virtual environment
+cd /home/atibhav/repos/fpl/ml-service
+source venv/bin/activate
+
+# Run the training script
+python ml/baseline_models.py
+```
+
+**Expected Output:**
+```
+============================================================
+FPL Points Prediction - Baseline Model Training
+============================================================
+
+Loading processed data...
+Dataset: 10538 samples, 7 features
+
+==================================================
+Training Linear Regression Model
+==================================================
+Training samples: 7376
+Testing samples: 3162
+
+--- Evaluation Metrics ---
+RMSE: 1.262 (lower is better)
+MAE: 0.677 (lower is better)
+R²: 0.732 (higher is better, max 1.0)
+CV RMSE: 1.238 (5-fold cross-validation)
+
+✓ Model saved to: /home/atibhav/repos/fpl/ml-service/models/linear_regression.pkl
+```
+
+---
+
+# Step 9: The Hybrid Prediction Approach
+
+A critical challenge emerged: how do we predict points for **live players** when our model was trained on historical data?
+
+## 9.1 The Problem
+
+**Training Data (Historical):**
+- Contains actual `last_6_avg_points`, `last_3_avg_points` from past gameweeks
+- Calculated from FPL-Elo-Insights dataset
+
+**Live Data (FPL API):**
+- Only provides `form` (FPL's built-in form calculation)
+- Doesn't directly provide rolling averages we trained on
+
+**The mismatch:**
+If we train on feature A but predict with approximation of feature A, predictions suffer.
+
+## 9.2 The Solution: Hybrid Approach
+
+We combine **both data sources** at prediction time:
+
+```
+┌─────────────────────────────────┐     ┌──────────────────────────┐
+│  FPL-Elo-Insights (Historical)  │     │  FPL API (Live)          │
+│  - last_6_avg_points (actual)   │     │  - form (current)        │
+│  - last_3_avg_points (actual)   │     │  - now_cost (current)    │
+│  - form_trend (calculated)      │     │  - selected_by_percent   │
+│  - last_6_avg_minutes           │     │    (current ownership)   │
+└──────────────────┬──────────────┘     └─────────────┬────────────┘
+                   │                                   │
+                   └──────────────┬────────────────────┘
+                                  ▼
+                       ┌───────────────────────┐
+                       │  HYBRID FEATURES      │
+                       │  Best of both worlds  │
+                       └──────────────┬────────┘
+                                      ▼
+                       ┌───────────────────────┐
+                       │  Linear Regression    │
+                       │  Model Prediction     │
+                       └──────────────────────┘
+```
+
+**Why this works:**
+- Rolling averages from our dataset are **accurate** (calculated from actual gameweek data)
+- Live data from FPL API is **current** (updates in real-time)
+- Combined, we get accurate features with current context
+
+## 9.3 Auto-Updating the Dataset
+
+The FPL-Elo-Insights dataset is updated **twice daily** (5am/5pm UTC). We can pull updates:
+
+**Manual Update:**
+```bash
+cd /home/atibhav/repos/fpl/ml-service/data/raw/FPL-Elo-Insights
+git pull origin main
+```
+
+**Automatic Update on Service Startup:**
+```python
+def update_dataset():
+    """
+    Pull latest updates from FPL-Elo-Insights GitHub repo.
+    Called on startup to ensure we have fresh data.
+    """
+    result = subprocess.run(
+        ["git", "pull", "origin", "main"],
+        cwd=ELO_INSIGHTS_PATH,
+        capture_output=True,
+        text=True,
+        timeout=30
+    )
+    
+    if "Already up to date" in result.stdout:
+        print("✓ Data is already up to date")
+    else:
+        print("✓ Data updated successfully")
+```
+
+This runs when FastAPI starts, ensuring predictions use the latest gameweek data.
+
+## 9.4 The Predictor Service
+
+**File:** `ml-service/ml/predictor.py`
+
+```python
+"""
+FPL Points Prediction Service - Hybrid Approach
+================================================
+Combines:
+1. Historical data from FPL-Elo-Insights (for rolling averages)
+2. Live data from FPL API (for current form, price, ownership)
+"""
+
+class FPLPredictor:
+    """
+    Loads trained model and player historical stats on initialization.
+    Provides fast predictions by pre-computing rolling averages.
+    """
+    
+    def __init__(self, auto_update=True):
+        if auto_update:
+            update_dataset()  # Pull latest data
+        
+        self._load_model()
+        self._load_player_history()  # Pre-compute rolling stats
+    
+    def _load_player_history(self):
+        """
+        Load all gameweek data and calculate rolling stats for each player.
+        Creates a lookup table: player_id -> {last_6_avg, last_3_avg, ...}
+        """
+        # Load all GW files for current season
+        for gw_folder in gw_folders:
+            df = pd.read_csv(stats_file)
+            all_data.append(df)
+        
+        combined = pd.concat(all_data)
+        
+        # Calculate rolling stats per player
+        for player_id in combined['id'].unique():
+            player_df = combined[combined['id'] == player_id]
+            points = player_df['event_points'].values
+            
+            self.player_history[player_id] = {
+                'last_6_avg_points': np.mean(points[-6:]),
+                'last_3_avg_points': np.mean(points[-3:]),
+                'form_trend': np.mean(points[-3:]) - np.mean(points[-6:]),
+                # ... more stats
+            }
+    
+    def _extract_features(self, player):
+        """
+        HYBRID: Use historical stats + live FPL API data.
+        """
+        player_id = player.get('id')
+        history = self.player_history.get(player_id, {})
+        
+        # From historical data (FPL-Elo-Insights)
+        last_6_avg = history.get('last_6_avg_points', 2.0)
+        last_3_avg = history.get('last_3_avg_points', 2.0)
+        form_trend = history.get('form_trend', 0.0)
+        
+        # From live FPL API
+        form = float(player.get('form', 0))
+        now_cost = float(player.get('now_cost', 50))
+        selected_by = float(player.get('selected_by_percent', 0))
+        
+        return np.array([last_6_avg, last_3_avg, form_trend, ..., form, now_cost, selected_by])
+    
+    def predict_single(self, player):
+        features = self._extract_features(player)
+        prediction = self.model.predict([features])[0]
+        return round(np.clip(prediction, 0, 25), 1)
+```
+
+### Key Design Decisions:
+
+| Decision | Why |
+|----------|-----|
+| Pre-compute rolling stats on startup | Fast predictions (no calculation during requests) |
+| Store in `player_history` dict | O(1) lookup by player_id |
+| Fallback for new players | Use FPL form if no history available |
+| Clip predictions to [0, 25] | Realistic range (can't score <0 or >25 realistically) |
+
+## 9.5 Updating FastAPI Endpoints
+
+**File:** `ml-service/main.py`
+
+```python
+from ml.predictor import predict_players, get_predictor
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    Initialize ML predictor on startup.
+    - Pulls latest FPL-Elo-Insights data
+    - Loads trained model
+    - Pre-computes player rolling stats
+    """
+    print("🚀 Starting FPL ML Service...")
+    predictor = get_predictor()
+    print(f"✓ Service ready with {len(predictor.player_history)} players loaded")
+
+
+@app.get("/health")
+def health_check():
+    predictor = get_predictor()
+    player_count = len(predictor.player_history)
+    model_loaded = predictor.model is not None
+    
+    return {
+        "status": "ok",
+        "message": f"Model: {'loaded' if model_loaded else 'not loaded'}, Players: {player_count}",
+        "version": "1.0.0"
+    }
+
+
+@app.post("/predict")
+def predict_points(request: PredictionRequest):
+    """
+    Predict points using HYBRID approach.
+    - Historical rolling stats from FPL-Elo-Insights
+    - Live form/price/ownership from FPL API
+    """
+    predictions = predict_players(request.players)
+    return {"predictions": predictions}
+
+
+@app.get("/player/{player_id}/stats")
+def get_player_stats(player_id: int):
+    """
+    Debug endpoint: Get calculated rolling stats for a player.
+    Useful for verifying the data pipeline.
+    """
+    predictor = get_predictor()
+    stats = predictor.get_player_stats(player_id)
+    return {"player_id": player_id, "stats": stats}
+```
+
+## 9.6 Testing the Prediction Service
+
+### Terminal Commands:
+
+```bash
+# Start the ML service
+cd /home/atibhav/repos/fpl/ml-service
+source venv/bin/activate
+python main.py &
+
+# Wait for startup
+sleep 10
+
+# Test health endpoint
+curl http://localhost:5001/health
+```
+
+**Expected Output:**
+```json
+{
+  "status": "ok",
+  "message": "FPL ML Service running! Model: loaded, Players: 756",
+  "version": "1.0.0"
+}
+```
+
+### Testing Predictions:
+
+```bash
+# Test prediction endpoint
+curl -X POST http://localhost:5001/predict \
+  -H "Content-Type: application/json" \
+  -d '{"players": [
+    {"id": 381, "form": "7.2", "now_cost": 130, "selected_by_percent": "45.0"},
+    {"id": 430, "form": "6.5", "now_cost": 148, "selected_by_percent": "67.0"},
+    {"id": 16, "form": "5.0", "now_cost": 100, "selected_by_percent": "32.0"}
+  ]}'
+```
+
+**Expected Output:**
+```json
+{
+  "predictions": {
+    "381": 11.2,
+    "430": 11.7,
+    "16": 9.1
+  }
+}
+```
+
+### Testing Player Stats Endpoint:
+
+```bash
+# Get Haaland's (ID 430) calculated stats
+curl http://localhost:5001/player/430/stats
+```
+
+**Expected Output:**
+```json
+{
+  "player_id": 430,
+  "stats": {
+    "last_6_avg_points": 6.17,
+    "last_3_avg_points": 6.0,
+    "form_trend": -0.17,
+    "last_6_avg_minutes": 88.5,
+    "games_played": 14,
+    "total_points": 120,
+    "web_name": "Haaland"
+  }
+}
+```
+
+## 9.7 Finding Player IDs
+
+The FPL API uses specific player IDs. To find a player's ID:
+
+```bash
+# Activate venv and run Python
+cd /home/atibhav/repos/fpl/ml-service
+source venv/bin/activate
+python3 -c "
+import pandas as pd
+df = pd.read_csv('data/raw/FPL-Elo-Insights/data/2025-2026/players.csv')
+
+# Search for players
+print(df[df['web_name'].str.contains('Salah', case=False, na=False)][['player_id', 'web_name']])
+print(df[df['web_name'].str.contains('Haaland', case=False, na=False)][['player_id', 'web_name']])
+print(df[df['web_name'].str.contains('Saka', case=False, na=False)][['player_id', 'web_name']])
+"
+```
+
+**Key Players:**
+| Player | FPL ID |
+|--------|--------|
+| Salah | 381 |
+| Haaland | 430 |
+| Saka | 16 |
+
+---
+
+## 9.8 Summary: What We Built
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                    FPL ML SERVICE                              │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  ON STARTUP:                                                   │
+│  1. Pull latest FPL-Elo-Insights data (git pull)              │
+│  2. Load trained Linear Regression model                       │
+│  3. Calculate rolling stats for all 756 players               │
+│                                                                │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  ENDPOINTS:                                                    │
+│                                                                │
+│  GET /health                                                   │
+│  → Returns service status, model loaded, player count          │
+│                                                                │
+│  POST /predict                                                 │
+│  → Takes player list from Spring Boot                          │
+│  → Returns {player_id: predicted_points}                       │
+│                                                                │
+│  GET /player/{id}/stats                                        │
+│  → Returns calculated rolling stats (debugging)                │
+│                                                                │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  HYBRID FEATURES:                                              │
+│  Historical (FPL-Elo-Insights)  +  Live (FPL API)             │
+│  - last_6_avg_points              - form                       │
+│  - last_3_avg_points              - now_cost                   │
+│  - form_trend                     - selected_by_percent        │
+│  - last_6_avg_minutes                                          │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+## 9.9 Project Structure After Step 9
+
+```
+fpl/
+├── ml-service/
+│   ├── main.py                 # FastAPI app with startup loading
+│   ├── requirements.txt
+│   ├── venv/                   # (not in Git)
+│   ├── ml/
+│   │   ├── __init__.py
+│   │   ├── baseline_models.py  # Linear Regression training
+│   │   └── predictor.py        # Hybrid prediction service
+│   ├── optimization/
+│   │   └── __init__.py
+│   ├── data/
+│   │   ├── __init__.py
+│   │   ├── data_processor.py   # Data pipeline
+│   │   ├── processed_data.csv  # (not in Git)
+│   │   └── raw/                # (not in Git)
+│   │       └── FPL-Elo-Insights/
+│   └── models/
+│       ├── linear_regression.pkl    # Trained model
+│       ├── ridge_alpha_0.1.pkl
+│       ├── ridge_alpha_1.0.pkl
+│       └── ridge_alpha_10.0.pkl
+├── server/                     # Spring Boot (existing)
+└── client/                     # React (existing)
+```
+
+---
+
+## 9.10 Next Steps
+
+With the ML prediction service working, the next tasks are:
+
+1. **Connect Spring Boot → FastAPI**: Create `MLServiceClient` to call `/predict`
+2. **Show predictions in React**: Display predicted points on PlayerCards
+3. **Train advanced models**: Random Forest, SVR, Ensemble (to beat baseline)
+4. **Implement PuLP optimization**: Auto-select optimal squad
+
+---
+
+## 9.11 Commit Progress
+
+```bash
+cd /home/atibhav/repos/fpl
+git add .
+git status
+git commit -m "feat(ml): Add baseline Linear Regression model with hybrid prediction
+
+- Trained Linear Regression achieving R²=0.732, RMSE=1.26
+- Created hybrid predictor combining FPL-Elo-Insights + FPL API data
+- Auto-update dataset on service startup (git pull)
+- Pre-compute rolling stats for 756 players
+- New endpoints: /health, /predict, /player/{id}/stats
+- Ridge regression variants for comparison"
+
+git push origin main
+```
+
