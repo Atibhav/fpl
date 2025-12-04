@@ -888,14 +888,14 @@ public class PlayerController {
     
     @GetMapping
     public ResponseEntity<List<Map<String, Object>>> getAllPlayers() {
-        try {
+  try {
             // Fetch players from FPL API
             List<Map<String, Object>> players = fplApiService.getAllPlayers();
-            
+    
             // Get predictions from ML service
             Map<String, Double> predictions = mlServiceClient.getPredictions(players);
-            
-            // Merge predictions with player data
+    
+    // Merge predictions with player data
             List<Map<String, Object>> enrichedPlayers = playerService.enrichPlayersWithPredictions(players, predictions);
             
             return ResponseEntity.ok(enrichedPlayers);
@@ -994,9 +994,9 @@ public class MLServiceClient {
         } catch (Exception e) {
             System.err.println("ML Service error: " + e.getMessage());
             return new HashMap<>(); // Return empty if ML service is down
-        }
-    }
-    
+  }
+}
+
     public Map<String, Object> optimizeSquad(List<Map<String, Object>> players, Double budget) {
         String url = mlServiceUrl + "/optimize/squad";
         
@@ -1698,8 +1698,8 @@ public class SquadController {
     
     @Autowired
     private SquadService squadService;
-    
-    // GET all saved squads
+
+// GET all saved squads
     @GetMapping
     public ResponseEntity<List<Squad>> getAllSquads() {
         List<Squad> squads = squadService.getAllSquads();
@@ -1713,15 +1713,15 @@ public class SquadController {
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
-    
-    // POST save new squad
+
+// POST save new squad
     @PostMapping
     public ResponseEntity<Squad> saveSquad(@RequestBody Squad squad) {
         Squad savedSquad = squadService.saveSquad(squad);
         return ResponseEntity.ok(savedSquad);
     }
-    
-    // DELETE squad
+
+// DELETE squad
     @DeleteMapping("/{id}")
     public ResponseEntity<Map<String, String>> deleteSquad(@PathVariable Long id) {
         squadService.deleteSquad(id);

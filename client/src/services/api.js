@@ -91,3 +91,19 @@ export const getSavedSquads = async () => {
     throw error;
   }
 };
+
+export const getUserSquad = async (fplId) => {
+  try {
+    const response = await fetch(`${API_BASE}/squads/user/${fplId}`);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error fetching user squad:', error);
+    throw error;
+  }
+};

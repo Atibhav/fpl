@@ -111,5 +111,17 @@ public class FplApiService {
                 .map(event -> (Integer) event.get("id"))
                 .orElse(1);
     }
+
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getUserTransfers(String fplId) {
+        String url = fplBaseUrl + "/entry/" + fplId + "/transfers/";
+        return restTemplate.getForObject(url, List.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getUserHistory(String fplId) {
+        String url = fplBaseUrl + "/entry/" + fplId + "/history/";
+        return restTemplate.getForObject(url, Map.class);
+    }
 }
 

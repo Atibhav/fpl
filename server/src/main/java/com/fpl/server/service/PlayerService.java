@@ -3,9 +3,7 @@ package com.fpl.server.service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -21,6 +19,8 @@ public class PlayerService {
         List<Map<String, Object>> players = fplApiService.getAllPlayers();
         List<Map<String, Object>> teams = fplApiService.getAllTeams();
         List<Map<String, Object>> elementTypes = fplApiService.getElementTypes();
+        List<Map<String, Object>> fixtures = fplApiService.getFixtures();
+        int currentGw = fplApiService.getCurrentGameweek();
         
         Map<Integer, String> teamMap = teams.stream()
                 .collect(Collectors.toMap(
@@ -33,6 +33,8 @@ public class PlayerService {
                         e -> (Integer) e.get("id"),
                         e -> (String) e.get("singular_name_short")
                 ));
+        
+        Map<Integer, List<Map<String, Object>>> teamFixtures = buildTeamFixtures(fixtures, teamMap, currentGw);
         
         List<Map<String, Object>> enrichedPlayers = players.stream()
                 .map(player -> {
@@ -55,6 +57,9 @@ public class PlayerService {
                     
                     enriched.put("predicted_points", 0.0);
                     
+                    List<Map<String, Object>> upcomingFixtures = teamFixtures.getOrDefault(teamId, new ArrayList<>());
+                    enriched.put("fixtures", upcomingFixtures.stream().limit(6).collect(Collectors.toList()));
+                    
                     return enriched;
                 })
                 .collect(Collectors.toList());
@@ -73,6 +78,51 @@ public class PlayerService {
         }
         
         return enrichedPlayers;
+    }
+    
+    private Map<Integer, List<Map<String, Object>>> buildTeamFixtures(
+            List<Map<String, Object>> fixtures, 
+            Map<Integer, String> teamMap,
+            int currentGw) {
+        
+        Map<Integer, List<Map<String, Object>>> teamFixtures = new HashMap<>();
+        
+        List<Map<String, Object>> upcomingFixtures = fixtures.stream()
+                .filter(f -> {
+                    Object eventObj = f.get("event");
+                    if (eventObj == null) return false;
+                    int event = (Integer) eventObj;
+                    return event >= currentGw;
+                })
+                .sorted(Comparator.comparingInt(f -> (Integer) f.get("event")))
+                .collect(Collectors.toList());
+        
+        for (Map<String, Object> fixture : upcomingFixtures) {
+            Integer homeTeam = (Integer) fixture.get("team_h");
+            Integer awayTeam = (Integer) fixture.get("team_a");
+            Integer homeTeamDifficulty = (Integer) fixture.get("team_h_difficulty");
+            Integer awayTeamDifficulty = (Integer) fixture.get("team_a_difficulty");
+            Integer event = (Integer) fixture.get("event");
+            
+            Map<String, Object> homeFixture = new HashMap<>();
+            homeFixture.put("gw", event);
+            homeFixture.put("opponent", teamMap.getOrDefault(awayTeam, "???"));
+            homeFixture.put("opponent_id", awayTeam);
+            homeFixture.put("is_home", true);
+            homeFixture.put("fdr", homeTeamDifficulty);
+            
+            Map<String, Object> awayFixture = new HashMap<>();
+            awayFixture.put("gw", event);
+            awayFixture.put("opponent", teamMap.getOrDefault(homeTeam, "???"));
+            awayFixture.put("opponent_id", homeTeam);
+            awayFixture.put("is_home", false);
+            awayFixture.put("fdr", awayTeamDifficulty);
+            
+            teamFixtures.computeIfAbsent(homeTeam, k -> new ArrayList<>()).add(homeFixture);
+            teamFixtures.computeIfAbsent(awayTeam, k -> new ArrayList<>()).add(awayFixture);
+        }
+        
+        return teamFixtures;
     }
     
     public List<Map<String, Object>> enrichPlayersWithPredictions(

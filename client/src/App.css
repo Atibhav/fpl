@@ -95,7 +95,7 @@ body {
   transform: translateY(-4px);
   border-color: #00ff87;
   background-color: #1a2744;
-}
+  }
 
 .feature-card.disabled {
   opacity: 0.5;

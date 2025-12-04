@@ -58,7 +58,7 @@ public class MLServiceClient {
     }
     
     @SuppressWarnings("unchecked")
-    public Map<String, Object> optimizeSquad(List<Map<String, Object>> players, Double budget) {
+    public Map<String, Object> optimizeSquad(List<Map<String, Object>> players, Double budget, boolean includeStartingEleven) {
         String url = mlServiceUrl + "/optimize/squad";
         
         try {
@@ -68,6 +68,7 @@ public class MLServiceClient {
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("players", players);
             requestBody.put("budget", budget);
+            requestBody.put("include_starting_eleven", includeStartingEleven);
             
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
             
@@ -101,3 +102,4 @@ public class MLServiceClient {
         }
     }
 }
+
