@@ -5427,3 +5427,219 @@ git commit -m "feat: Add walk-forward backtesting for model validation"
 git push origin main
 ```
 
+---
+
+## 9.16 Squad Optimization with PuLP (Linear Programming)
+
+This section implements automatic squad selection using Linear Programming (LP). This is **not Machine Learning** — it's Mathematical Optimization, a related but distinct field.
+
+### Understanding the Problem
+
+**Goal:** Select 15 players that maximize total predicted points while satisfying FPL constraints.
+
+**Constraints:**
+- Budget ≤ £100m
+- Exactly 2 GKP, 5 DEF, 5 MID, 3 FWD
+- Maximum 3 players from any single team
+
+This is a **Binary Integer Linear Program (BILP)** — each player is either selected (1) or not (0).
+
+### Why Not Greedy Algorithm?
+
+A natural DSA instinct is to use a **greedy algorithm**:
+
+```python
+# Greedy Approach (SUBOPTIMAL)
+def greedy_squad(players, budget):
+    sorted_players = sorted(players, key=lambda p: p['predicted_points'], reverse=True)
+    selected = []
+    for player in sorted_players:
+        if can_add(player, selected, budget):  # Check constraints
+            selected.append(player)
+            budget -= player['price']
+        if len(selected) == 15:
+            break
+    return selected
+```
+
+**Why Greedy Fails:**
+
+| Scenario | Greedy Result | Optimal Result |
+|----------|--------------|----------------|
+| £20 left, need 1 DEF + 1 MID | Picks £15 DEF (best), can't afford good MID | Picks £10 DEF + £10 MID = higher total |
+| 3 players from Man City already | Can't pick Haaland even though he's best | Might skip earlier City player to fit Haaland |
+| Expensive GKs picked early | Little budget for outfielders | Cheaper GKs = more budget for attackers |
+
+**Key Insight:** Greedy makes **locally optimal** choices at each step, but FPL constraints create **global dependencies** that require considering all selections simultaneously.
+
+### Mathematical Formulation
+
+**Decision Variables:**
+```
+xᵢ ∈ {0, 1} for each player i
+xᵢ = 1 if player i is selected, 0 otherwise
+```
+
+**Objective Function (Maximize):**
+```
+Σ (predicted_pointsᵢ × xᵢ) for all players i
+```
+
+**Constraints:**
+```
+Σ xᵢ = 15                                    (exactly 15 players)
+Σ (priceᵢ × xᵢ) ≤ 100                        (budget limit)
+Σ xᵢ = 2  for all GKP                        (2 goalkeepers)
+Σ xᵢ = 5  for all DEF                        (5 defenders)
+Σ xᵢ = 5  for all MID                        (5 midfielders)
+Σ xᵢ = 3  for all FWD                        (3 forwards)
+Σ xᵢ ≤ 3  for each team                      (max 3 per team)
+```
+
+### The Code (`ml-service/optimization/team_optimizer.py`)
+
+```python
+from pulp import LpProblem, LpMaximize, LpVariable, lpSum, LpBinary, PULP_CBC_CMD
+
+def optimize_squad(players, budget=100.0):
+    # Create the optimization problem
+    prob = LpProblem("FPL_Squad_Optimization", LpMaximize)
+    
+    # Decision variables: pick[id] = 1 if selected, 0 otherwise
+    pick = {p['id']: LpVariable(f"pick_{p['id']}", cat=LpBinary) for p in players}
+    
+    # Objective: maximize total predicted points
+    prob += lpSum(p['predicted_points'] * pick[p['id']] for p in players)
+    
+    # Constraint: exactly 15 players
+    prob += lpSum(pick[p['id']] for p in players) == 15
+    
+    # Constraint: budget limit
+    prob += lpSum(p['price'] * pick[p['id']] for p in players) <= budget
+    
+    # Constraint: position requirements (2 GKP, 5 DEF, 5 MID, 3 FWD)
+    for position, required in {'GKP': 2, 'DEF': 5, 'MID': 5, 'FWD': 3}.items():
+        prob += lpSum(pick[p['id']] for p in players if p['position'] == position) == required
+    
+    # Constraint: max 3 players per team
+    for team in set(p['team'] for p in players):
+        prob += lpSum(pick[p['id']] for p in players if p['team'] == team) <= 3
+    
+    # Solve using CBC (Coin-or Branch and Cut) solver
+    prob.solve(PULP_CBC_CMD(msg=0))
+    
+    # Extract selected players
+    return [p for p in players if pick[p['id']].value() == 1]
+```
+
+### How the Solver Works (For Your Optimization Background)
+
+PuLP translates our Python code into standard LP format and calls the **CBC solver** (Coin-or Branch and Cut).
+
+**Solution Methods Used:**
+
+1. **Simplex Method**: For the LP relaxation (treating xᵢ as continuous 0-1)
+2. **Branch and Bound**: For integer constraints (xᵢ must be exactly 0 or 1)
+3. **Cutting Planes**: Additional constraints to tighten the LP relaxation
+
+Since you've studied simplex and interior point methods, you understand:
+- LP relaxation gives upper bound
+- Branch and bound explores integer solutions
+- Optimal when gap between bounds closes to 0
+
+**Complexity:** NP-hard in general, but FPL's small size (~750 players, 15 selected) solves in <1 second.
+
+### Starting Eleven Selection
+
+After selecting 15 players, we also pick the best starting 11 with optimal formation:
+
+```python
+def select_starting_eleven(squad):
+    valid_formations = [
+        (3, 4, 3), (3, 5, 2), (4, 3, 3), (4, 4, 2), (4, 5, 1), (5, 3, 2), (5, 4, 1)
+    ]
+    
+    # Try each formation, pick the one with highest total predicted points
+    best_formation = max(valid_formations, 
+                         key=lambda f: calculate_formation_points(squad, f))
+    
+    return starters, bench, formation_string
+```
+
+This is a simple enumeration (only 7 formations) — no need for LP here.
+
+### API Endpoint
+
+**POST /optimize/squad**
+
+Request:
+```json
+{
+  "players": [...],  // Array of player objects with predicted_points
+  "budget": 100.0,
+  "include_starting_eleven": true
+}
+```
+
+Response:
+```json
+{
+  "squad": [...],           // 15 selected players
+  "total_cost": 99.5,
+  "expected_points": 85.3,
+  "status": "Optimal",
+  "budget_remaining": 0.5,
+  "starters": [...],        // 11 starting players
+  "bench": [...],           // 4 bench players
+  "formation": "3-4-3",
+  "starting_expected_points": 72.1
+}
+```
+
+### Greedy vs LP: Summary
+
+| Aspect | Greedy | Linear Programming |
+|--------|--------|-------------------|
+| **Guarantee** | No optimality guarantee | **Proven optimal** |
+| **How it works** | Pick best available at each step | Consider all constraints simultaneously |
+| **Complexity** | O(n log n) | Polynomial (fast in practice) |
+| **When it fails** | Tight budget, team limits, position conflicts | Never (if feasible solution exists) |
+| **DSA Category** | Greedy Algorithms | Mathematical Optimization |
+| **When to use** | Quick approximation, simple constraints | Must have optimal, complex constraints |
+
+### Interview Talking Points
+
+1. **"Why LP instead of greedy?"**
+   - Greedy makes locally optimal choices that can be globally suboptimal
+   - FPL has interdependent constraints (budget affects all positions)
+   - LP guarantees the mathematically optimal solution
+
+2. **"How does PuLP work?"**
+   - PuLP is a modeling library, not a solver
+   - Translates Python code to standard LP format
+   - Calls external solver (CBC) which uses simplex + branch-and-bound
+
+3. **"What's the complexity?"**
+   - Binary Integer LP is NP-hard in general
+   - But FPL's small problem size (~750 players) solves in <1 second
+   - Practical complexity depends on constraint structure
+
+4. **"Could you use dynamic programming?"**
+   - Possible but complex (state = budget × positions × team counts)
+   - LP is cleaner and standard approach for this problem type
+
+### Testing the Optimizer
+
+```bash
+# Test via FastAPI docs
+# Navigate to http://localhost:5001/docs
+# Use the POST /optimize/squad endpoint
+```
+
+### Files Changed
+
+- `ml-service/optimization/team_optimizer.py` - Full PuLP implementation
+- `ml-service/main.py` - Updated endpoint to use LP optimizer
+
+---
+

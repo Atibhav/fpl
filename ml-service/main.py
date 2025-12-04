@@ -5,6 +5,7 @@ from typing import List, Dict, Optional, Any
 import uvicorn
 
 from ml.predictor import predict_players, get_predictor
+from optimization.team_optimizer import optimize_squad, optimize_with_starting_eleven
 
 
 class PlayerFeatures(BaseModel):
@@ -32,6 +33,7 @@ class PredictionResponse(BaseModel):
 class OptimizeRequest(BaseModel):
     players: List[Dict]
     budget: float = 100.0
+    include_starting_eleven: bool = False
 
 
 class OptimizeResponse(BaseModel):
@@ -39,6 +41,11 @@ class OptimizeResponse(BaseModel):
     total_cost: float
     expected_points: float
     status: str
+    budget_remaining: Optional[float] = None
+    starters: Optional[List[Dict]] = None
+    bench: Optional[List[Dict]] = None
+    formation: Optional[str] = None
+    starting_expected_points: Optional[float] = None
 
 
 class HealthResponse(BaseModel):
@@ -111,49 +118,26 @@ def get_player_stats(player_id: int):
 
 
 @app.post("/optimize/squad", response_model=OptimizeResponse)
-def optimize_squad(request: OptimizeRequest):
-    players = request.players
-    budget = request.budget
-    
-    sorted_players = sorted(
-        players, 
-        key=lambda x: x.get('predicted_points', 0), 
-        reverse=True
-    )
-    
-    selected = []
-    total_cost = 0.0
-    position_counts = {'GK': 0, 'DEF': 0, 'MID': 0, 'FWD': 0}
-    position_limits = {'GK': 2, 'DEF': 5, 'MID': 5, 'FWD': 3}
-    team_counts = {}
-    
-    for player in sorted_players:
-        pos = player.get('position', 'MID')
-        team = player.get('team', 'Unknown')
-        price = player.get('price', 0)
+def optimize_squad_endpoint(request: OptimizeRequest):
+    try:
+        if request.include_starting_eleven:
+            result = optimize_with_starting_eleven(request.players, request.budget)
+        else:
+            result = optimize_squad(request.players, request.budget)
         
-        if len(selected) >= 15:
-            break
-        if position_counts.get(pos, 0) >= position_limits.get(pos, 0):
-            continue
-        if team_counts.get(team, 0) >= 3:
-            continue
-        if total_cost + price > budget:
-            continue
-        
-        selected.append(player)
-        total_cost += price
-        position_counts[pos] = position_counts.get(pos, 0) + 1
-        team_counts[team] = team_counts.get(team, 0) + 1
-    
-    expected_points = sum(p.get('predicted_points', 0) for p in selected)
-    
-    return OptimizeResponse(
-        squad=selected,
-        total_cost=round(total_cost, 1),
-        expected_points=round(expected_points, 1),
-        status="Optimal" if len(selected) == 15 else "Partial"
-    )
+        return OptimizeResponse(
+            squad=result.get('squad', []),
+            total_cost=result.get('total_cost', 0.0),
+            expected_points=result.get('expected_points', 0.0),
+            status=result.get('status', 'Unknown'),
+            budget_remaining=result.get('budget_remaining'),
+            starters=result.get('starters'),
+            bench=result.get('bench'),
+            formation=result.get('formation'),
+            starting_expected_points=result.get('starting_expected_points')
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
