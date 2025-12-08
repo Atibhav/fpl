@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getUserSquad, getPlayers } from '../services/api';
+import { supabase } from '../supabaseClient';
 import './SquadBuilder.css';
 
 const VALID_FORMATIONS = ['3-4-3', '3-5-2', '4-4-2', '4-3-3', '4-5-1', '5-3-2', '5-4-1', '5-2-3'];
@@ -27,21 +28,68 @@ function SquadBuilder() {
 
   useEffect(() => {
     if (fplId) {
-      const saved = localStorage.getItem(`fpl_plan_${fplId}`);
-      if (saved) {
+      const fetchSavedPlan = async () => {
         try {
-          setSavedPlan(JSON.parse(saved));
-          setShowSavedPlan(true);
-        } catch (e) {
+          const { data, error } = await supabase
+            .from('squads')
+            .select('*')
+            .eq('fpl_id', fplId)
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          if (error) throw error;
+
+          if (data && data.length > 0) {
+            setSavedPlan(data[0]);
+            setShowSavedPlan(true);
+          } else {
+            setSavedPlan(null);
+            setShowSavedPlan(false);
+          }
+        } catch (err) {
+          console.error('Error fetching saved plan:', err);
           setSavedPlan(null);
           setShowSavedPlan(false);
         }
-      } else {
-        setSavedPlan(null);
-        setShowSavedPlan(false);
-      }
+      };
+
+      fetchSavedPlan();
     }
   }, [fplId]);
+
+  const savePlan = async () => {
+    if (!fplId) return;
+    
+    try {
+      const planData = {
+        fpl_id: fplId,
+        plan_name: planName || `Plan ${new Date().toLocaleDateString()}`,
+        squad_data: currentSquad,
+        transfers_data: transfers
+      };
+
+      const { error } = await supabase
+        .from('squads')
+        .insert([planData]);
+
+      if (error) throw error;
+
+      alert('Plan saved successfully!');
+      setSavedPlan(planData);
+      setShowSavedPlan(true);
+    } catch (err) {
+      console.error('Error saving plan:', err);
+      alert('Failed to save plan');
+    }
+  };
+
+  const loadSavedPlan = () => {
+    if (savedPlan) {
+      setCurrentSquad(savedPlan.squad_data);
+      setTransfers(savedPlan.transfers_data || []);
+      alert('Plan loaded!');
+    }
+  };
 
   const handleLoadTeam = async () => {
     if (!fplId.trim()) {
@@ -595,9 +643,17 @@ function SquadBuilder() {
               </span>
               <span>Budget: <strong>£{calculateBudgetSimple().toFixed(1)}m</strong></span>
             </div>
-            {transfers.length > 0 && (
-              <button className="reset-btn" onClick={resetAllTransfers}>Reset Transfers</button>
-            )}
+            <div className="plan-actions">
+              <button className="save-btn" onClick={savePlan}>Save Plan</button>
+              {showSavedPlan && (
+                <button className="load-btn" onClick={loadSavedPlan}>
+                  Load Saved Plan
+                </button>
+              )}
+              {transfers.length > 0 && (
+                <button className="reset-btn" onClick={resetAllTransfers}>Reset Transfers</button>
+              )}
+            </div>
           </div>
 
           {transfers.length > 0 && (

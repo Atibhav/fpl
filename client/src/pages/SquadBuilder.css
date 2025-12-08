@@ -160,6 +160,40 @@
   background: rgba(255, 82, 82, 0.1);
 }
 
+.plan-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.save-btn, .load-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.save-btn {
+  background: #00ff87;
+  color: #0d1b2a;
+}
+
+.save-btn:hover {
+  background: #00cc6a;
+  transform: translateY(-1px);
+}
+
+.load-btn {
+  background: #05f0ff;
+  color: #0d1b2a;
+}
+
+.load-btn:hover {
+  background: #00c2d1;
+  transform: translateY(-1px);
+}
+
 .transfers-list {
   background: #1a2744;
   border-radius: 8px;
