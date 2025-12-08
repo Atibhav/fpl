@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { getUserSquad, getPlayers } from '../services/api';
 import './SquadBuilder.css';
 
@@ -21,6 +21,27 @@ function SquadBuilder() {
   const [priceInputValue, setPriceInputValue] = useState('');
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [transferPrices, setTransferPrices] = useState({});
+  const [savedPlan, setSavedPlan] = useState(null);
+  const [showSavedPlan, setShowSavedPlan] = useState(false);
+  const [planName, setPlanName] = useState('');
+
+  useEffect(() => {
+    if (fplId) {
+      const saved = localStorage.getItem(`fpl_plan_${fplId}`);
+      if (saved) {
+        try {
+          setSavedPlan(JSON.parse(saved));
+          setShowSavedPlan(true);
+        } catch (e) {
+          setSavedPlan(null);
+          setShowSavedPlan(false);
+        }
+      } else {
+        setSavedPlan(null);
+        setShowSavedPlan(false);
+      }
+    }
+  }, [fplId]);
 
   const handleLoadTeam = async () => {
     if (!fplId.trim()) {
