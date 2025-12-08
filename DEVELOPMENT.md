@@ -5846,3 +5846,79 @@ const makeCaptain = (player) => {
 **Action:** Removed the "Formation: 3-5-2" text overlay from the pitch view as it was redundant and cluttered the mobile interface.
 
 ---
+
+# Step 12: Deployment
+
+**Goal:** Deploy the full-stack application to the cloud using free-tier services.
+
+## 12.1 Deployment Architecture
+
+We are using a microservices-style deployment:
+
+1.  **Frontend (React):** Deployed on **Vercel**.
+    *   Why: Best-in-class for React, free SSL, global CDN.
+2.  **Backend (Spring Boot):** Deployed on **Render** (Docker).
+    *   Why: Supports Docker containers on free tier.
+3.  **ML Service (Flask):** Deployed on **Render** (Docker).
+    *   Why: Supports Docker containers on free tier.
+4.  **Database (PostgreSQL):** Hosted on **Supabase**.
+    *   Why: Managed Postgres with free tier.
+
+## 12.2 Docker Configuration
+
+To deploy the backends to Render, we "containerized" them using Docker. This ensures they run exactly the same way in the cloud as they do on our machine.
+
+### Spring Boot Dockerfile (`server/Dockerfile`)
+We used a multi-stage build to keep the image small:
+1.  **Build Stage:** Uses `eclipse-temurin:17-jdk` to compile the Java code and build the JAR file.
+2.  **Run Stage:** Uses `eclipse-temurin:17-jre` (lighter weight) to run the JAR.
+
+### ML Service Dockerfile (`ml-service/Dockerfile`)
+1.  Uses `python:3.10-slim` base image.
+2.  Installs system dependencies.
+3.  Installs Python packages from `requirements.txt`.
+4.  Uses `gunicorn` as the production WSGI server (instead of the development server `uvicorn`).
+
+## 12.3 Frontend Configuration (`client/vercel.json`)
+
+We added a `vercel.json` file to handle client-side routing. Since React is a Single Page App (SPA), all requests (like `/planner`, `/players`) must be redirected to `index.html` so React Router can handle them.
+
+```json
+{
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}
+```
+
+## 12.4 Deployment Steps (Manual)
+
+Since this is a portfolio project, we connect our GitHub repository to these services for automatic deployments.
+
+### 1. Push Code to GitHub
+Ensure all changes, including Dockerfiles, are committed and pushed.
+
+### 2. Deploy ML Service (Render)
+1.  New Web Service -> Connect GitHub Repo.
+2.  Root Directory: `ml-service`.
+3.  Runtime: Docker.
+4.  **Environment Variables:** None needed (unless we add API keys later).
+
+### 3. Deploy Spring Boot Backend (Render)
+1.  New Web Service -> Connect GitHub Repo.
+2.  Root Directory: `server`.
+3.  Runtime: Docker.
+4.  **Environment Variables:**
+    *   `ML_SERVICE_URL`: The URL of the deployed ML Service (e.g., `https://fpl-ml-service.onrender.com`).
+    *   `SPRING_DOCKER_COMPOSE_ENABLED`: `false`.
+
+### 4. Deploy Frontend (Vercel)
+1.  New Project -> Connect GitHub Repo.
+2.  Root Directory: `client`.
+3.  Framework Preset: Create React App.
+4.  **Environment Variables:**
+    *   `REACT_APP_API_URL`: The URL of the deployed Spring Boot Backend (e.g., `https://fpl-server.onrender.com/api`).
+    *   `REACT_APP_SUPABASE_URL`: Your Supabase URL.
+    *   `REACT_APP_SUPABASE_ANON_KEY`: Your Supabase Anon Key.
+
+---
