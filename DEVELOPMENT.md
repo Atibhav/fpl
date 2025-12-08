@@ -23,7 +23,8 @@ This document serves as a comprehensive development guide and tutorial for build
    - [Step 8: Optimization Engine](#step-8-optimization-engine)
    - [Step 9: Full UI Implementation](#step-9-full-ui-implementation)
    - [Step 10: Database Integration](#step-10-database-integration)
-   - [Step 11: Deployment](#step-11-deployment)
+   - [Step 11: Mobile Responsiveness & UI Polish](#step-11-mobile-responsiveness--ui-polish)
+   - [Step 12: Deployment](#step-12-deployment)
 6. [Issues and Resolutions](#issues-and-resolutions)
 7. [Key Concepts Explained](#key-concepts-explained)
 
@@ -5762,5 +5763,86 @@ We modified the `SquadBuilder` component to interact with Supabase instead of `l
 
 ### Why JSONB?
 We used the `jsonb` data type for `squad_data`. This is a powerful feature of PostgreSQL that lets us store unstructured data (like a JavaScript array of objects) while still being able to query it efficiently. It saves us from creating complex relational tables (`squads` -> `squad_players` -> `players`) for what is essentially a "snapshot" feature.
+
+---
+
+# Step 11: Mobile Responsiveness & UI Polish
+
+**Goal:** Ensure the application is usable on mobile devices and fix specific UI/UX issues related to layout, visibility, and game logic.
+
+## 11.1 Mobile-First CSS Adjustments
+
+The initial desktop-focused design broke on smaller screens (iPhone 11 simulation). We implemented extensive CSS Media Queries to handle the complex pitch layout on mobile.
+
+**File:** `client/src/pages/SquadBuilder.css`
+
+### Key Challenges & Solutions:
+
+1.  **Pitch Layout Overflow:**
+    *   **Problem:** The 5-player rows (DEF/MID) were wider than the mobile screen, causing horizontal scrolling and misalignment.
+    *   **Solution:** Used `flex-wrap: wrap` and adjusted widths.
+    *   **Refinement:** Switched to fixed percentage widths (`width: 19%`) with `justify-content: center` to keep players in a single row without wrapping, mimicking the real FPL app.
+
+2.  **Player Card Sizing:**
+    *   **Problem:** Player names and fixture boxes were too large, overlapping or getting cut off.
+    *   **Solution:** Drastically reduced font sizes (`0.4rem`) and padding.
+    *   **Detail:** Added `white-space: nowrap` and `text-overflow: ellipsis` to handle long names (e.g., "Donnarumma").
+
+3.  **Visibility & Contrast:**
+    *   **Problem:** White text on a light green pitch was unreadable.
+    *   **Solution:** Added a semi-transparent background (`rgba(0, 0, 0, 0.3)`) and text shadow (`0 1px 3px rgba(0, 0, 0, 0.8)`) to player names.
+
+4.  **Alignment:**
+    *   **Problem:** Player cards in a row were of varying heights, causing the "Next Fixture" boxes to be misaligned.
+    *   **Solution:** Enforced fixed heights (`height: 14px`) and line-heights for name containers to ensure perfect horizontal alignment across the row.
+
+```css
+/* Example Mobile Media Query */
+@media (max-width: 600px) {
+  .pitch-player {
+    width: 19%;        /* Fit 5 players in a row */
+    min-height: 85px;  /* Compact vertical size */
+    gap: 1px;          /* Tight spacing */
+  }
+
+  .player-name-pitch {
+    font-size: 0.4rem;
+    height: 14px;      /* Fixed height for alignment */
+    white-space: nowrap;
+    overflow: hidden;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); /* Readability */
+  }
+}
+```
+
+## 11.2 Logic Fixes: Captaincy & Formation
+
+We refined the application logic based on user testing.
+
+### Captaincy Mutual Exclusivity
+**Issue:** A user could theoretically have multiple captains or a captain who was also a vice-captain.
+**Fix:** Updated the state update logic to ensure mutual exclusivity.
+*   Setting a Captain automatically removes the Captain armband from anyone else.
+*   Setting a Captain automatically removes the Vice-Captain status from that specific player (if they had it).
+
+```javascript
+const makeCaptain = (player) => {
+  setCurrentSquad(currentSquad.map(p => ({
+    ...p,
+    is_captain: p.id === player.id,
+    // If this player becomes captain, they can't be VC.
+    // If another player was captain, they lose it.
+    // Other players keep their VC status unless they are the new captain.
+    is_vice_captain: p.id === player.id ? false : p.is_vice_captain
+  })));
+};
+```
+
+### Bench Restrictions
+**Issue:** Users could captain bench players.
+**Fix:** Added a conditional check in the Player Modal to only render Captain/Vice-Captain buttons if `player.squad_position <= 11`.
+
+### UI Cleanup
+**Action:** Removed the "Formation: 3-5-2" text overlay from the pitch view as it was redundant and cluttered the mobile interface.
 
 ---

@@ -272,22 +272,7 @@
   font-size: 0.85rem;
 }
 
-.formation-display {
-  text-align: center;
-  color: #00ff87;
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin-bottom: 10px;
-  padding: 5px 12px;
-  background: rgba(0, 255, 135, 0.1);
-  border-radius: 20px;
-  display: inline-block;
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2;
-}
+
 
 .pitch-container {
   margin-bottom: 20px;
@@ -631,19 +616,122 @@
 }
 
 @media (max-width: 600px) {
+  .squad-builder {
+    padding: 10px;
+  }
+
+  .team-id-input {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .team-id-input input {
+    width: 100%;
+  }
+
   .pitch-row {
-    gap: 5px;
+    width: 100%;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  .pitch-player {
+    min-height: 85px;
+    padding: 1px;
+    width: 19%;
+    max-width: 60px;
+    min-width: 0;
+    flex: 0 0 auto;
+    gap: 1px;
   }
 
   .player-shirt {
-    width: 40px;
-    height: 40px;
-    font-size: 0.55rem;
+    width: 30px;
+    height: 30px;
+    font-size: 0.45rem;
   }
 
   .player-name-pitch {
-    font-size: 0.6rem;
-    max-width: 50px;
+    font-size: 0.4rem;
+    font-weight: 700;
+    width: 100%;
+    max-width: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    justify-content: center;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    padding: 1px 0;
+    margin-top: 1px;
+    height: 14px;
+    line-height: 14px;
+  }
+
+  .next-fixture {
+    font-size: 0.28rem;
+    padding: 0 1px;
+    width: auto;
+    max-width: 90%;
+    height: 10px;
+    line-height: 10px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-align: center;
+    margin-top: 1px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .fixture-bar {
+    margin-top: 1px;
+    gap: 1px;
+    justify-content: center;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .fixture-chip {
+    min-width: 8px;
+    height: 8px;
+    font-size: 0.3rem;
+    padding: 0;
+    line-height: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Show all fixtures */
+  .fixture-chip:nth-child(n+4) {
+    display: flex;
+  }
+
+  .bench-row {
+    width: 100%;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  .bench-row .pitch-player {
+    min-height: 80px;
+  }
+
+  .plan-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .save-btn, .load-btn, .reset-btn {
+    width: 100%;
+    text-align: center;
+    margin-bottom: 5px;
+  }
+  
+  .transfers-bar {
+    align-items: stretch;
   }
 }
 

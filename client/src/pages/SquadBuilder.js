@@ -307,7 +307,7 @@ function SquadBuilder() {
     setCurrentSquad(currentSquad.map(p => ({
       ...p,
       is_captain: p.id === player.id,
-      is_vice_captain: p.is_captain ? true : (p.id === player.id ? false : p.is_vice_captain)
+      is_vice_captain: p.id === player.id ? false : p.is_vice_captain
     })));
     setModalPlayer(prev => prev ? { ...prev, is_captain: true, is_vice_captain: false } : null);
   };
@@ -316,7 +316,7 @@ function SquadBuilder() {
     setCurrentSquad(currentSquad.map(p => ({
       ...p,
       is_vice_captain: p.id === player.id,
-      is_captain: p.is_vice_captain ? true : (p.id === player.id ? false : p.is_captain)
+      is_captain: p.id === player.id ? false : p.is_captain
     })));
     setModalPlayer(prev => prev ? { ...prev, is_vice_captain: true, is_captain: false } : null);
   };
@@ -506,7 +506,6 @@ function SquadBuilder() {
     return (
       <div className="pitch-container">
         <div className="pitch">
-          <div className="formation-display">Formation: {currentFormation}</div>
           <div className="pitch-grass">
             {renderRow(fwd)}
             {renderRow(mid)}
@@ -750,24 +749,26 @@ function SquadBuilder() {
             )}
 
             <div className="modal-actions">
-              <div className="captain-actions">
-                <button 
-                  className={`modal-btn captain-btn ${modalPlayer.is_captain ? 'active' : ''}`}
-                  onClick={() => makeCaptain(modalPlayer)}
-                  disabled={modalPlayer.is_captain}
-                >
-                  <span className="btn-icon">C</span>
-                  <span>{modalPlayer.is_captain ? 'Captain' : 'Make Captain'}</span>
-                </button>
-                <button 
-                  className={`modal-btn vc-btn ${modalPlayer.is_vice_captain ? 'active' : ''}`}
-                  onClick={() => makeViceCaptain(modalPlayer)}
-                  disabled={modalPlayer.is_vice_captain}
-                >
-                  <span className="btn-icon">VC</span>
-                  <span>{modalPlayer.is_vice_captain ? 'Vice Captain' : 'Make Vice Captain'}</span>
-                </button>
-              </div>
+              {modalPlayer.squad_position <= 11 && (
+                <div className="captain-actions">
+                  <button 
+                    className={`modal-btn captain-btn ${modalPlayer.is_captain ? 'active' : ''}`}
+                    onClick={() => makeCaptain(modalPlayer)}
+                    disabled={modalPlayer.is_captain}
+                  >
+                    <span className="btn-icon">C</span>
+                    <span>{modalPlayer.is_captain ? 'Captain' : 'Make Captain'}</span>
+                  </button>
+                  <button 
+                    className={`modal-btn vc-btn ${modalPlayer.is_vice_captain ? 'active' : ''}`}
+                    onClick={() => makeViceCaptain(modalPlayer)}
+                    disabled={modalPlayer.is_vice_captain}
+                  >
+                    <span className="btn-icon">VC</span>
+                    <span>{modalPlayer.is_vice_captain ? 'Vice Captain' : 'Make Vice Captain'}</span>
+                  </button>
+                </div>
+              )}
 
               <div className="squad-actions">
                 <button className="modal-btn sub-btn" onClick={handleSubstituteFromModal}>
