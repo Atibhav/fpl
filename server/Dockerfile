@@ -1,14 +1,11 @@
 # Build Stage
-FROM eclipse-temurin:17-jdk-jammy AS build
+FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /app
-COPY .mvn/ .mvn/
-COPY mvnw pom.xml ./
-# Ensure mvnw is executable
-RUN chmod +x mvnw
-# Download dependencies (offline mode)
-RUN ./mvnw dependency:go-offline
+COPY pom.xml .
+# Download dependencies
+RUN mvn dependency:go-offline
 COPY src ./src
-RUN ./mvnw clean package -DskipTests
+RUN mvn clean package -DskipTests
 
 # Run Stage
 FROM eclipse-temurin:17-jre-jammy
