@@ -58,7 +58,8 @@ public class PlayerService {
                     enriched.put("predicted_points", 0.0);
                     
                     List<Map<String, Object>> upcomingFixtures = teamFixtures.getOrDefault(teamId, new ArrayList<>());
-                    enriched.put("fixtures", upcomingFixtures.stream().limit(6).collect(Collectors.toList()));
+                    // Return more fixtures to allow frontend to handle multi-gameweek planning
+                    enriched.put("fixtures", upcomingFixtures.stream().limit(38).collect(Collectors.toList()));
                     
                     return enriched;
                 })

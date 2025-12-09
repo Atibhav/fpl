@@ -32,6 +32,22 @@ export const getPlayers = async () => {
   }
 };
 
+export const getGameweeks = async () => {
+  try {
+    const response = await fetch(`${API_BASE}/players/gameweeks`);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error fetching gameweeks:', error);
+    throw error;
+  }
+};
+
 export const optimizeSquad = async (budget) => {
   try {
     const response = await fetch(`${API_BASE}/squads/optimize`, {

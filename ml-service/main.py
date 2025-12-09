@@ -86,18 +86,22 @@ async def startup_event():
         data_dir = "data/raw/FPL-Elo-Insights"
         repo_url = "https://github.com/olbauday/FPL-Elo-Insights.git"
         
+        # Check if data exists to avoid infinite reload loop in local dev
         if os.path.exists(data_dir):
-            print(f"  - Removing old data at {data_dir}")
-            shutil.rmtree(data_dir)
+            print(f"  - Data directory exists at {data_dir}")
+            print("  - Skipping download to prevent local reload loop.")
+            print("  - (To force update locally, delete the 'data/raw/FPL-Elo-Insights' folder)")
+        else:
+            print(f"  - Cloning fresh data from {repo_url}")
+            subprocess.run(["git", "clone", repo_url, data_dir], check=True)
             
-        print(f"  - Cloning fresh data from {repo_url}")
-        subprocess.run(["git", "clone", repo_url, data_dir], check=True)
+            print("  - Processing new data...")
+            process_data()
+            
+            print("  - Retraining models...")
+            compare_models()
         
-        print("  - Processing new data...")
-        process_data()
-        
-        print("  - Retraining models...")
-        compare_models()
+        print("✅ Data check complete!")
         
         print("✅ Data update and model retraining complete!")
         
@@ -172,9 +176,12 @@ def optimize_squad_endpoint(request: OptimizeRequest):
 
 
 if __name__ == "__main__":
+    # We need to exclude the 'data' directory from reloading
+    # because our startup script modifies files there, which causes an infinite restart loop.
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=5001,
-        reload=True
+        reload=True,
+        reload_excludes=["data/*"]
     )

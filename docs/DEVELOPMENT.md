@@ -6003,3 +6003,79 @@ async def startup_event():
     # ...
 ```
 
+## 13.3 Understanding the Logs
+
+When the ML service starts, you will see detailed logs in the terminal. Here is a breakdown of a typical startup sequence:
+
+```text
+INFO:     Will watch for changes in these directories: ['/home/atibhav/repos/fpl/ml-service']
+INFO:     Uvicorn running on http://0.0.0.0:5001
+...
+🚀 Starting FPL ML Service...
+🔄 Checking for data updates...
+  - Data directory exists at data/raw/FPL-Elo-Insights
+  - Skipping download to prevent local reload loop.
+✅ Data check complete!
+✅ Data update and model retraining complete!
+📥 Checking for FPL-Elo-Insights updates...
+✓ Data is already up to date
+✓ Loaded prediction model
+📊 Loading player historical data...
+  Loaded 11299 records from GW1-15
+✓ Calculated rolling stats for 759 players
+✓ Service ready with 759 players loaded
+INFO:     Application startup complete.
+```
+
+**Key Log Events:**
+1.  **`Checking for data updates...`**: The service checks if the data folder exists.
+    *   **Locally:** It sees the folder, prints "Skipping download", and proceeds. This prevents the infinite reload loop.
+    *   **Production:** It sees an empty folder, runs `git clone` (you'll see "Receiving objects..."), processes the data, and retrains the models.
+2.  **`Loaded prediction model`**: The service successfully loaded the trained AI model (Linear Regression/XGBoost).
+3.  **`Service ready with X players`**: The final confirmation that the API is up and ready to serve predictions.
+
+## 13.4 Local vs. Production Behavior
+
+*   **Local Development:** The script checks if `data/raw/FPL-Elo-Insights` exists. If it does, it **skips** the download. This prevents an infinite loop where the server downloads data -> detects file change -> restarts -> downloads data again. To force an update locally, simply delete the `data/raw/FPL-Elo-Insights` folder.
+*   **Production (Render):** The filesystem is ephemeral (temporary). Every time the app starts, the `data` folder is empty. The script detects this, downloads the fresh data, processes it, and serves the latest predictions. This ensures your live app is always up to date.
+
+---
+
+# Step 14: Multi-Gameweek Planning
+
+**Goal:** Allow users to plan their squad and transfers for future gameweeks, not just the current one.
+
+## 14.1 Feature Overview
+We enhanced the Squad Builder to support "time travel" planning:
+1.  **Gameweek Navigation:** Users can click "Next GW" to see their team in future weeks.
+2.  **State Persistence:** Transfers made in GW `X` automatically carry over to GW `X+1`.
+3.  **Independent Planning:** You can make different transfers in different weeks (e.g., sell Salah in GW12, buy him back in GW15).
+4.  **Reset Options:**
+    *   **Reset GW:** Reverts the current week to the state of the previous week.
+    *   **Reset All:** Reverts the entire plan to your current live FPL team.
+
+## 14.2 Implementation Details
+*   **Frontend (`SquadBuilder.js`):** Refactored state management to use a `gameweekData` object, keyed by Gameweek ID.
+    ```javascript
+    // State Structure
+    {
+      34: { squad: [...], transfers: [], bank: 1.5 },
+      35: { squad: [...], transfers: [], bank: 2.0 } // Inherits from GW34
+    }
+    ```
+*   **Backend (`PlayerController.java`):** Added endpoints to fetch the official Gameweek schedule (`/api/players/gameweeks`) so the frontend knows which GW is next and when the deadlines are.
+
+## 14.3 Dynamic Fixture Updates (Fix)
+**Issue:** Initially, the "Next Fixture" and "Upcoming Fixtures" on the player cards were static. If you navigated to GW15, the card still showed the fixture for GW12 (the current real-world week).
+
+**Solution:**
+1.  **Backend (`PlayerService.java`):** Increased the number of returned fixtures from 6 to 38. This ensures the frontend has the full schedule available for planning deep into the season.
+2.  **Frontend (`SquadBuilder.js`):** Implemented filtering logic in the `renderPlayer` function.
+    ```javascript
+    // Filter fixtures to start from the currently viewed Gameweek
+    const futureFixtures = fixtures.filter(f => f.gw >= currentGameweekId);
+    const nextFixture = futureFixtures[0];
+    ```
+    Now, when you click "Next GW", the fixtures on the pitch update to reflect the opponents for *that* specific week.
+
+

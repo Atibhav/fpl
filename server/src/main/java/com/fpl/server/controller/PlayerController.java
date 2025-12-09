@@ -53,6 +53,16 @@ public class PlayerController {
             return ResponseEntity.internalServerError().build();
         }
     }
+
+    @GetMapping("/gameweeks")
+    public ResponseEntity<List<Map<String, Object>>> getGameweeks() {
+        try {
+            List<Map<String, Object>> gameweeks = fplApiService.getGameweeks();
+            return ResponseEntity.ok(gameweeks);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
     
     @GetMapping("/fixtures")
     public ResponseEntity<List<Map<String, Object>>> getFixtures() {

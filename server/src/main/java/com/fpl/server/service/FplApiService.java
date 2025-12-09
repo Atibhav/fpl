@@ -63,6 +63,12 @@ public class FplApiService {
         Map<String, Object> bootstrap = getBootstrapData();
         return (List<Map<String, Object>>) bootstrap.get("teams");
     }
+
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getGameweeks() {
+        Map<String, Object> bootstrap = getBootstrapData();
+        return (List<Map<String, Object>>) bootstrap.get("events");
+    }
     
     @SuppressWarnings("unchecked")
     public List<Map<String, Object>> getElementTypes() {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getUserSquad, getPlayers } from '../services/api';
+import { getUserSquad, getPlayers, getGameweeks } from '../services/api';
 import { supabase } from '../supabaseClient';
 import './SquadBuilder.css';
 
@@ -11,8 +11,20 @@ function SquadBuilder() {
   const [error, setError] = useState(null);
   const [teamData, setTeamData] = useState(null);
   const [allPlayers, setAllPlayers] = useState([]);
-  const [currentSquad, setCurrentSquad] = useState([]);
-  const [transfers, setTransfers] = useState([]);
+  
+  // Gameweek State
+  const [gameweeks, setGameweeks] = useState([]);
+  const [currentGameweekId, setCurrentGameweekId] = useState(null);
+  const [initialGameweekId, setInitialGameweekId] = useState(null);
+  
+  // Squad State per Gameweek
+  // Structure: { [gwId]: { squad: [], transfers: [], bank: 0, freeTransfers: 1 } }
+  const [gameweekData, setGameweekData] = useState({});
+  
+  // Derived state for current view
+  const currentSquad = gameweekData[currentGameweekId]?.squad || [];
+  const transfers = gameweekData[currentGameweekId]?.transfers || [];
+  
   const [selectedOut, setSelectedOut] = useState(null);
   const [selectedForSwap, setSelectedForSwap] = useState(null);
   const [playerFilter, setPlayerFilter] = useState({ position: 'ALL', search: '', maxPrice: 20 });
@@ -25,6 +37,26 @@ function SquadBuilder() {
   const [savedPlan, setSavedPlan] = useState(null);
   const [showSavedPlan, setShowSavedPlan] = useState(false);
   const [planName, setPlanName] = useState('');
+
+  useEffect(() => {
+    const fetchGameweeks = async () => {
+      try {
+        const gws = await getGameweeks();
+        setGameweeks(gws);
+        
+        // Find the next active gameweek
+        // Logic: Find first GW where is_next is true, or calculate based on deadline
+        const nextGw = gws.find(gw => gw.is_next) || gws[0];
+        if (nextGw) {
+          setInitialGameweekId(nextGw.id);
+          setCurrentGameweekId(nextGw.id);
+        }
+      } catch (err) {
+        console.error("Failed to fetch gameweeks", err);
+      }
+    };
+    fetchGameweeks();
+  }, []);
 
   useEffect(() => {
     if (fplId) {
@@ -64,8 +96,9 @@ function SquadBuilder() {
       const planData = {
         fpl_id: fplId,
         plan_name: planName || `Plan ${new Date().toLocaleDateString()}`,
-        squad_data: currentSquad,
-        transfers_data: transfers
+        squad_data: gameweekData[initialGameweekId]?.squad || [], // Save base squad
+        transfers_data: transfers, // This might need to be updated to save full multi-gw plan
+        full_plan: gameweekData // Save the entire multi-gameweek state
       };
 
       const { error } = await supabase
@@ -85,8 +118,19 @@ function SquadBuilder() {
 
   const loadSavedPlan = () => {
     if (savedPlan) {
-      setCurrentSquad(savedPlan.squad_data);
-      setTransfers(savedPlan.transfers_data || []);
+      if (savedPlan.full_plan) {
+        setGameweekData(savedPlan.full_plan);
+      } else {
+        // Legacy plan support
+        setGameweekData({
+          [initialGameweekId]: {
+            squad: savedPlan.squad_data,
+            transfers: savedPlan.transfers_data || [],
+            bank: teamData?.bank || 0,
+            freeTransfers: 1
+          }
+        });
+      }
       alert('Plan loaded!');
     }
   };
@@ -100,7 +144,8 @@ function SquadBuilder() {
     try {
       setLoading(true);
       setError(null);
-      setTransfers([]);
+      // Reset state
+      setGameweekData({});
       setSelectedOut(null);
 
       const [userData, playersData] = await Promise.all([
@@ -113,14 +158,140 @@ function SquadBuilder() {
       }
 
       setTeamData(userData);
-      setCurrentSquad(userData.squad || []);
       setAllPlayers(playersData);
+      
+      // Initialize the first gameweek with fetched data
+      if (initialGameweekId) {
+        setGameweekData({
+          [initialGameweekId]: {
+            squad: userData.squad || [],
+            transfers: [],
+            bank: userData.bank || 0,
+            freeTransfers: 1 // Default to 1 FT for next GW
+          }
+        });
+        setCurrentGameweekId(initialGameweekId);
+      }
+      
     } catch (err) {
       setError(err.message || 'Failed to load team. Check your Team ID.');
       console.error(err);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Helper to update state for a specific GW
+  const updateGameweekState = (gwId, newState) => {
+    setGameweekData(prev => {
+      const updated = { ...prev, [gwId]: { ...prev[gwId], ...newState } };
+      
+      // Propagate changes to future gameweeks
+      // If we change GW X, GW X+1 should inherit the resulting squad of GW X
+      // But we must preserve transfers made in GW X+1 if possible
+      
+      let currentGw = gwId;
+      let nextGw = getNextGameweekId(currentGw);
+      
+      let runningState = updated;
+      
+      while (nextGw && runningState[nextGw]) {
+        // The starting squad for nextGw is the ending squad of currentGw
+        const prevGwState = runningState[currentGw];
+        const prevSquadAfterTransfers = applyTransfersToSquad(prevGwState.squad, prevGwState.transfers);
+        
+        // We need to re-apply nextGw's transfers to this new base squad
+        // Note: This might fail if a player was transferred out in prevGw that is also transferred out in nextGw
+        // For simplicity, we'll just update the base squad and keep transfers if valid
+        
+        runningState = {
+          ...runningState,
+          [nextGw]: {
+            ...runningState[nextGw],
+            squad: prevSquadAfterTransfers
+          }
+        };
+        
+        currentGw = nextGw;
+        nextGw = getNextGameweekId(currentGw);
+      }
+      
+      return runningState;
+    });
+  };
+
+  const getNextGameweekId = (currentId) => {
+    const idx = gameweeks.findIndex(gw => gw.id === currentId);
+    if (idx !== -1 && idx < gameweeks.length - 1) {
+      return gameweeks[idx + 1].id;
+    }
+    return null;
+  };
+  
+  const getPrevGameweekId = (currentId) => {
+    const idx = gameweeks.findIndex(gw => gw.id === currentId);
+    if (idx > 0) {
+      return gameweeks[idx - 1].id;
+    }
+    return null;
+  };
+
+  const handleGameweekChange = (direction) => {
+    if (!currentGameweekId) return;
+    
+    let newId;
+    if (direction === 'next') {
+      newId = getNextGameweekId(currentGameweekId);
+      
+      // If moving to a new future GW that doesn't exist in state yet
+      if (newId && !gameweekData[newId]) {
+        const currentGwState = gameweekData[currentGameweekId];
+        const squadAfterTransfers = applyTransfersToSquad(currentGwState.squad, currentGwState.transfers);
+        
+        // Calculate bank after transfers
+        // This is a simplified calculation
+        const bankAfterTransfers = calculateBankAfterTransfers(currentGwState);
+
+        setGameweekData(prev => ({
+          ...prev,
+          [newId]: {
+            squad: squadAfterTransfers,
+            transfers: [],
+            bank: bankAfterTransfers,
+            freeTransfers: 1 // Accumulate logic could go here (max 5)
+          }
+        }));
+      }
+    } else {
+      newId = getPrevGameweekId(currentGameweekId);
+      // Prevent going before initial loaded GW
+      if (newId < initialGameweekId) return;
+    }
+    
+    if (newId) {
+      setCurrentGameweekId(newId);
+      setSelectedOut(null);
+      setSelectedForSwap(null);
+    }
+  };
+
+  const applyTransfersToSquad = (baseSquad, transfersList) => {
+    let newSquad = [...baseSquad];
+    transfersList.forEach(t => {
+      newSquad = newSquad.map(p => 
+        p.id === t.out.id ? { ...t.in, squad_position: p.squad_position, is_starter: p.is_starter } : p
+      );
+    });
+    return newSquad;
+  };
+  
+  const calculateBankAfterTransfers = (gwState) => {
+    let bank = gwState.bank;
+    gwState.transfers.forEach(t => {
+      bank += (t.out.price || 0);
+      bank -= (t.in.price || 0);
+    });
+    return bank;
   };
 
   const getPositionColor = (position) => {
@@ -186,7 +357,7 @@ function SquadBuilder() {
     const pos1 = player1.squad_position;
     const pos2 = player2.squad_position;
     
-    setCurrentSquad(currentSquad.map(p => {
+    const newSquad = currentSquad.map(p => {
       if (p.id === player1.id) {
         return { ...p, squad_position: pos2 };
       }
@@ -194,7 +365,9 @@ function SquadBuilder() {
         return { ...p, squad_position: pos1 };
       }
       return p;
-    }));
+    });
+    
+    updateGameweekState(currentGameweekId, { squad: newSquad });
   };
 
   const handlePlayerClick = (player) => {
@@ -274,33 +447,66 @@ function SquadBuilder() {
       in: playerIn
     };
 
-    setTransfers([...transfers, newTransfer]);
+    const newTransfers = [...transfers, newTransfer];
     
-    setCurrentSquad(currentSquad.map(p => 
+    const newSquad = currentSquad.map(p => 
       p.id === selectedOut.id ? { ...playerIn, squad_position: selectedOut.squad_position, is_starter: selectedOut.is_starter } : p
-    ));
+    );
+
+    updateGameweekState(currentGameweekId, {
+      squad: newSquad,
+      transfers: newTransfers
+    });
 
     setSelectedOut(null);
   };
 
   const undoTransfer = (index) => {
     const transfer = transfers[index];
-    setCurrentSquad(currentSquad.map(p => 
+    const newSquad = currentSquad.map(p => 
       p.id === transfer.in.id ? { ...transfer.out, squad_position: p.squad_position, is_starter: p.is_starter } : p
-    ));
-    setTransfers(transfers.filter((_, i) => i !== index));
+    );
+    const newTransfers = transfers.filter((_, i) => i !== index);
+    
+    updateGameweekState(currentGameweekId, {
+      squad: newSquad,
+      transfers: newTransfers
+    });
   };
 
   const resetAllTransfers = () => {
-    if (teamData) {
-      setCurrentSquad(teamData.squad || []);
-      setTransfers([]);
+    if (teamData && initialGameweekId) {
+      // Reset to initial state
+      setGameweekData({
+        [initialGameweekId]: {
+          squad: teamData.squad || [],
+          transfers: [],
+          bank: teamData.bank || 0,
+          freeTransfers: 1
+        }
+      });
+      setCurrentGameweekId(initialGameweekId);
       setSelectedOut(null);
       setSelectedForSwap(null);
       setSwapError(null);
-      setAdjustedPrices({});
-      setTransferPrices({});
     }
+  };
+  
+  const resetCurrentGameweek = () => {
+    if (!currentGameweekId || currentGameweekId === initialGameweekId) return;
+    
+    const prevId = getPrevGameweekId(currentGameweekId);
+    const prevGwState = gameweekData[prevId];
+    
+    // Re-initialize current GW from previous GW's end state
+    const squadAfterTransfers = applyTransfersToSquad(prevGwState.squad, prevGwState.transfers);
+    const bankAfterTransfers = calculateBankAfterTransfers(prevGwState);
+    
+    updateGameweekState(currentGameweekId, {
+      squad: squadAfterTransfers,
+      transfers: [],
+      bank: bankAfterTransfers
+    });
   };
 
   const makeCaptain = (player) => {
@@ -395,34 +601,18 @@ function SquadBuilder() {
     return transfers[transferIndex]?.in?.price || 0;
   };
 
-  const budgetAfterTransfers = () => {
+  const calculateBudget = () => {
     const startingBudget = (teamData?.bank || 0) + (teamData?.squad_value || 0);
     
-    let netTransferCost = 0;
-    transfers.forEach((_, idx) => {
-      const outPrice = getTransferOutPrice(idx);
-      const inPrice = getTransferInPrice(idx);
-      netTransferCost += (inPrice - outPrice);
-    });
+    // Calculate current squad value
+    const currentSquadValue = currentSquad.reduce((sum, p) => sum + (p.price || 0), 0);
     
-    return Math.round((startingBudget - (teamData?.squad_value || 0) + 
-      currentSquad.reduce((sum, p) => {
-        const isTransferredIn = transfers.some(t => t.in.id === p.id);
-        if (isTransferredIn) {
-          const transferIdx = transfers.findIndex(t => t.in.id === p.id);
-          return sum + getTransferInPrice(transferIdx);
-        }
-        return sum + (p.price || 0);
-      }, 0) - (teamData?.squad_value || 0) - netTransferCost) * 10) / 10;
+    return Math.round((startingBudget - currentSquadValue) * 10) / 10;
   };
 
   const calculateBudgetSimple = () => {
-    let budget = (teamData?.bank || 0);
-    transfers.forEach((_, idx) => {
-      budget += getTransferOutPrice(idx);
-      budget -= getTransferInPrice(idx);
-    });
-    return Math.round(budget * 10) / 10;
+    // Use the bank tracked in state
+    return gameweekData[currentGameweekId]?.bank || 0;
   };
 
   const renderPitchView = () => {
@@ -441,9 +631,12 @@ function SquadBuilder() {
       const isSelectedForSwap = selectedForSwap?.id === player.id;
       const playerIsTransferredIn = transfers.some(t => t.in.id === player.id);
       const displayPrice = getPlayerPrice(player);
+      
       const fixtures = player.fixtures || [];
-      const nextFixture = fixtures[0];
-      const upcomingFixtures = fixtures.slice(1, 6);
+      // Filter fixtures to start from the currentGameweekId
+      const futureFixtures = fixtures.filter(f => f.gw >= currentGameweekId);
+      const nextFixture = futureFixtures[0];
+      const upcomingFixtures = futureFixtures.slice(1, 6);
 
       return (
         <div 
@@ -611,6 +804,33 @@ function SquadBuilder() {
 
       {teamData && (
         <>
+          <div className="gameweek-navigation">
+            <button 
+              className="nav-btn prev" 
+              onClick={() => handleGameweekChange('prev')}
+              disabled={!currentGameweekId || currentGameweekId <= initialGameweekId}
+            >
+              ← GW{currentGameweekId ? currentGameweekId - 1 : ''}
+            </button>
+            
+            <div className="current-gameweek">
+              <h2>Gameweek {currentGameweekId}</h2>
+              <span className="deadline-label">
+                {gameweeks.find(g => g.id === currentGameweekId)?.deadline_time 
+                  ? new Date(gameweeks.find(g => g.id === currentGameweekId).deadline_time).toLocaleString()
+                  : ''}
+              </span>
+            </div>
+            
+            <button 
+              className="nav-btn next" 
+              onClick={() => handleGameweekChange('next')}
+              disabled={!currentGameweekId || currentGameweekId >= 38}
+            >
+              GW{currentGameweekId ? currentGameweekId + 1 : ''} →
+            </button>
+          </div>
+
           <div className="team-info-bar">
             <div className="info-item">
               <span className="label">Manager</span>
@@ -621,25 +841,18 @@ function SquadBuilder() {
               <span className="value">{teamData.team_name}</span>
             </div>
             <div className="info-item">
-              <span className="label">GW</span>
-              <span className="value">{teamData.gameweek}</span>
-            </div>
-            <div className="info-item">
               <span className="label">Bank</span>
-              <span className="value">£{teamData.bank?.toFixed(1)}m</span>
+              <span className="value">£{calculateBudgetSimple().toFixed(1)}m</span>
             </div>
             <div className="info-item">
               <span className="label">Free Transfers</span>
-              <span className="value">{freeTransfers}</span>
+              <span className="value">{gameweekData[currentGameweekId]?.freeTransfers || 1}</span>
             </div>
           </div>
 
           <div className="transfers-bar">
             <div className="transfer-stats">
-              <span>Transfers: <strong>{transfersMade}</strong></span>
-              <span className={transferCost > 0 ? 'cost-warning' : ''}>
-                Cost: <strong>{transferCost > 0 ? `-${transferCost}` : '0'}</strong> pts
-              </span>
+              <span>Transfers: <strong>{transfers.length}</strong></span>
               <span>Budget: <strong>£{calculateBudgetSimple().toFixed(1)}m</strong></span>
             </div>
             <div className="plan-actions">
@@ -650,8 +863,9 @@ function SquadBuilder() {
                 </button>
               )}
               {transfers.length > 0 && (
-                <button className="reset-btn" onClick={resetAllTransfers}>Reset Transfers</button>
+                <button className="reset-btn" onClick={resetCurrentGameweek}>Reset GW{currentGameweekId}</button>
               )}
+              <button className="reset-all-btn" onClick={resetAllTransfers}>Reset All</button>
             </div>
           </div>
 
