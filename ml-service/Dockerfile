@@ -5,6 +5,7 @@ WORKDIR /app
 # Install system dependencies (if any needed for numpy/pandas)
 RUN apt-get update && apt-get install -y \
     build-essential \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache

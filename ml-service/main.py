@@ -3,6 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Any
 import uvicorn
+import os
+import shutil
+import subprocess
+from data.data_processor import process_data
+from ml.baseline_models import compare_models
 
 from ml.predictor import predict_players, get_predictor
 from optimization.team_optimizer import optimize_squad, optimize_with_starting_eleven
@@ -74,6 +79,32 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     print("🚀 Starting FPL ML Service...")
+    
+    # Auto-update data
+    try:
+        print("🔄 Checking for data updates...")
+        data_dir = "data/raw/FPL-Elo-Insights"
+        repo_url = "https://github.com/olbauday/FPL-Elo-Insights.git"
+        
+        if os.path.exists(data_dir):
+            print(f"  - Removing old data at {data_dir}")
+            shutil.rmtree(data_dir)
+            
+        print(f"  - Cloning fresh data from {repo_url}")
+        subprocess.run(["git", "clone", repo_url, data_dir], check=True)
+        
+        print("  - Processing new data...")
+        process_data()
+        
+        print("  - Retraining models...")
+        compare_models()
+        
+        print("✅ Data update and model retraining complete!")
+        
+    except Exception as e:
+        print(f"⚠️ Data update failed: {e}")
+        print("  - Continuing with existing/fallback data if available.")
+
     predictor = get_predictor()
     print(f"✓ Service ready with {len(predictor.player_history)} players loaded")
 

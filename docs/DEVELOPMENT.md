@@ -5922,3 +5922,84 @@ Ensure all changes, including Dockerfiles, are committed and pushed.
     *   `REACT_APP_SUPABASE_ANON_KEY`: Your Supabase Anon Key.
 
 ---
+
+### 2. Deploy ML Service (Render)
+1.  New Web Service -> Connect GitHub Repo.
+2.  Root Directory: `ml-service`.
+3.  Runtime: Docker.
+4.  **Environment Variables:** None needed (unless we add API keys later).
+
+### 3. Deploy Spring Boot Backend (Render)
+1.  New Web Service -> Connect GitHub Repo.
+2.  Root Directory: `server`.
+3.  Runtime: Docker.
+4.  **Environment Variables:**
+    *   `ML_SERVICE_URL`: The URL of the deployed ML Service (e.g., `https://fpl-ml-service.onrender.com`).
+    *   `SPRING_DOCKER_COMPOSE_ENABLED`: `false`.
+
+### 4. Deploy Frontend (Vercel)
+1.  New Project -> Connect GitHub Repo.
+2.  Root Directory: `client`.
+3.  Framework Preset: Create React App.
+4.  **Environment Variables:**
+    *   `REACT_APP_API_URL`: The URL of the deployed Spring Boot Backend (e.g., `https://fpl-server.onrender.com/api`).
+    *   `REACT_APP_SUPABASE_URL`: Your Supabase URL.
+    *   `REACT_APP_SUPABASE_ANON_KEY`: Your Supabase Anon Key.
+
+## 12.5 Issues Encountered & Resolutions
+
+Deployment rarely goes perfectly on the first try. Here are the specific challenges we faced and how we solved them:
+
+### Issue 1: Spring Boot Build Failed on Render
+**Error:** `COPY .mvn/ .mvn/: "/.mvn": not found`
+**Cause:** The `.mvn` wrapper directory was listed in `.gitignore`, so it wasn't uploaded to GitHub. The Dockerfile tried to copy a folder that didn't exist.
+**Resolution:** We updated the `server/Dockerfile` to use the official Maven base image (`maven:3.9-eclipse-temurin-17`) instead of relying on the local wrapper. This makes the build more robust as it doesn't depend on local files.
+
+### Issue 2: React Build Failed on Vercel
+**Error:** `Module not found: Error: Can't resolve '@supabase/supabase-js'`
+**Cause:** We had installed the Supabase client locally but hadn't saved it to `package.json` (or it wasn't committed properly). Vercel didn't know it needed to install this package.
+**Resolution:** Ran `npm install @supabase/supabase-js --save` in the client directory and pushed the updated `package.json` to GitHub.
+
+### Issue 3: CORS Errors on Production
+**Error:** `Cross-Origin Request Blocked... (Reason: CORS header ‘Access-Control-Allow-Origin’ missing)`
+**Cause:** Our Spring Boot `CorsConfig.java` was hardcoded to only allow requests from `http://localhost:3000`. It blocked requests from our Vercel domain.
+**Resolution:** Updated `CorsConfig.java` to use `.allowedOriginPatterns("*")` to allow requests from any domain (suitable for this portfolio project).
+
+### Issue 4: API 404 Errors
+**Error:** `POST https://fpl-server.onrender.com/players 404 Not Found`
+**Cause:** The `REACT_APP_API_URL` environment variable in Vercel was set to the root domain (`...onrender.com`) but our API endpoints are prefixed with `/api` (e.g., `/api/players`).
+**Resolution:** Updated the Vercel environment variable to append `/api` to the URL and redeployed the frontend.
+
+---
+
+# Step 13: Auto-Update Data
+
+**Goal:** Ensure the ML Service always uses the latest FPL data without manual intervention.
+
+## 13.1 The Problem
+Our data source (`FPL-Elo-Insights`) updates daily. However, our deployment on Render was using a static copy of the data from when we first pushed the code. This meant predictions would become stale over time.
+
+## 13.2 The Solution: Update on Startup
+Since we are using the Render Free Tier, our service "spins down" (turns off) after 15 minutes of inactivity. When a user visits the site, it "spins up" (restarts). We leveraged this behavior to trigger a data update.
+
+We modified the `ml-service` to:
+1.  **Install Git:** Updated `Dockerfile` to include `git`.
+2.  **Clone on Startup:** Updated `main.py` to:
+    *   Delete the old `data/raw/FPL-Elo-Insights` folder.
+    *   `git clone` the fresh repository from GitHub.
+    *   Run `process_data()` to generate new training data.
+    *   Retrain the models immediately.
+
+This ensures that every time the app wakes up, it has the freshest possible data.
+
+```python
+# ml-service/main.py snippet
+@app.on_event("startup")
+async def startup_event():
+    # ...
+    subprocess.run(["git", "clone", repo_url, data_dir], check=True)
+    process_data()
+    compare_models()
+    # ...
+```
+
