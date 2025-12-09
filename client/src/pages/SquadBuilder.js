@@ -510,20 +510,22 @@ function SquadBuilder() {
   };
 
   const makeCaptain = (player) => {
-    setCurrentSquad(currentSquad.map(p => ({
+    const newSquad = currentSquad.map(p => ({
       ...p,
       is_captain: p.id === player.id,
       is_vice_captain: p.id === player.id ? false : p.is_vice_captain
-    })));
+    }));
+    updateGameweekState(currentGameweekId, { squad: newSquad });
     setModalPlayer(prev => prev ? { ...prev, is_captain: true, is_vice_captain: false } : null);
   };
 
   const makeViceCaptain = (player) => {
-    setCurrentSquad(currentSquad.map(p => ({
+    const newSquad = currentSquad.map(p => ({
       ...p,
       is_vice_captain: p.id === player.id,
       is_captain: p.id === player.id ? false : p.is_captain
-    })));
+    }));
+    updateGameweekState(currentGameweekId, { squad: newSquad });
     setModalPlayer(prev => prev ? { ...prev, is_vice_captain: true, is_captain: false } : null);
   };
 
