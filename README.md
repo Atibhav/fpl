@@ -26,17 +26,7 @@ A full-stack AI-powered assistant for Fantasy Premier League managers. This appl
 *   `client/`: React frontend application.
 *   `server/`: Spring Boot REST API backend.
 *   `ml-service/`: Python Machine Learning service for predictions and optimization.
-*   `docs/`: Detailed development documentation and project plans.
-
-## 📖 Documentation
-
-For a deep dive into how this project was built, step-by-step, check out the **[Development Guide](docs/DEVELOPMENT.md)**.
-
-It covers:
-*   Setting up the microservices architecture.
-*   Training the ML models.
-*   Building the optimization algorithm.
-*   Deploying to the cloud with Docker.
+  
 
 ## 🏃‍♂️ Getting Started (Local Dev)
 
