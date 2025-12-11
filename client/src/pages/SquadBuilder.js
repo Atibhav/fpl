@@ -18,7 +18,6 @@ function SquadBuilder() {
   const [initialGameweekId, setInitialGameweekId] = useState(null);
   
   // Squad State per Gameweek
-  // Structure: { [gwId]: { squad: [], transfers: [], bank: 0, freeTransfers: 1 } }
   const [gameweekData, setGameweekData] = useState({});
   
   // Derived state for current view
@@ -45,7 +44,6 @@ function SquadBuilder() {
         setGameweeks(gws);
         
         // Find the next active gameweek
-        // Logic: Find first GW where is_next is true, or calculate based on deadline
         const nextGw = gws.find(gw => gw.is_next) || gws[0];
         if (nextGw) {
           setInitialGameweekId(nextGw.id);
@@ -96,9 +94,9 @@ function SquadBuilder() {
       const planData = {
         fpl_id: fplId,
         plan_name: planName || `Plan ${new Date().toLocaleDateString()}`,
-        squad_data: gameweekData[initialGameweekId]?.squad || [], // Save base squad
-        transfers_data: transfers, // This might need to be updated to save full multi-gw plan
-        full_plan: gameweekData // Save the entire multi-gameweek state
+        squad_data: gameweekData[initialGameweekId]?.squad || [],
+        transfers_data: transfers,
+        full_plan: gameweekData
       };
 
       const { error } = await supabase

@@ -1,21 +1,5 @@
 """
 FPL Data Processor - FPL-Elo-Insights Dataset
-==============================================
-Processes the FPL-Elo-Insights dataset which includes:
-- Official FPL API data (playerstats)
-- Detailed match stats with xG (matches, playermatchstats)
-- Team Elo ratings (teams)
-
-Data Source: https://github.com/olbauday/FPL-Elo-Insights
-
-Key Features:
-- Per-gameweek discrete stats (not cumulative)
-- Team Elo ratings for opponent strength
-- CBIT stats (Clearances, Blocks, Interceptions, Tackles)
-- xG, xA at player and team level
-
-Usage:
-    python data_processor.py
 """
 
 import pandas as pd
@@ -31,11 +15,6 @@ DATA_PATH = Path(__file__).parent / "raw" / "FPL-Elo-Insights" / "data"
 def load_teams_with_elo(season='2025-2026'):
     """
     Load team data including Elo ratings.
-    
-    Elo rating is a measure of team strength (higher = stronger):
-    - Top teams: ~2000+ (Man City, Arsenal, Liverpool)
-    - Mid-table: ~1700-1900
-    - Relegation: ~1600-1700
     
     Returns:
         pd.DataFrame: Teams with Elo and strength ratings
@@ -61,11 +40,6 @@ def load_teams_with_elo(season='2025-2026'):
 def load_player_gameweek_stats(season='2025-2026', max_gw=None):
     """
     Load per-gameweek discrete player stats.
-    
-    The player_gameweek_stats file has NON-CUMULATIVE stats:
-    - goals_scored is goals in THAT gameweek only
-    - minutes is minutes in THAT gameweek only
-    This is perfect for calculating rolling averages.
     
     Args:
         season: Season folder name (e.g., '2025-2026')

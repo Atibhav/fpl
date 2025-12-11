@@ -80,17 +80,13 @@ app.add_middleware(
 async def startup_event():
     print("🚀 Starting FPL ML Service...")
     
-    # Auto-update data
     try:
         print("🔄 Checking for data updates...")
         data_dir = "data/raw/FPL-Elo-Insights"
         repo_url = "https://github.com/olbauday/FPL-Elo-Insights.git"
         
-        # Check if data exists to avoid infinite reload loop in local dev
         if os.path.exists(data_dir):
             print(f"  - Data directory exists at {data_dir}")
-            print("  - Skipping download to prevent local reload loop.")
-            print("  - (To force update locally, delete the 'data/raw/FPL-Elo-Insights' folder)")
         else:
             print(f"  - Cloning fresh data from {repo_url}")
             subprocess.run(["git", "clone", repo_url, data_dir], check=True)

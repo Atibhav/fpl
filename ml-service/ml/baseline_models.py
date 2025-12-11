@@ -1,18 +1,5 @@
 """
 Baseline ML Models for FPL Points Prediction
-=============================================
-This module implements the baseline Linear Regression model.
-
-Linear Regression is our starting point because:
-1. It's simple and interpretable
-2. Provides a baseline to compare against more complex models
-3. Fast to train and predict
-4. Good for understanding feature importance
-
-University Concepts Used:
-- Supervised Learning (Regression)
-- Train/Test Split
-- Model Evaluation Metrics (RMSE, MAE, R²)
 """
 
 import numpy as np
@@ -70,17 +57,6 @@ def load_processed_data():
 def train_linear_regression(X, y, model_name='linear_regression'):
     """
     Train a Linear Regression model.
-    
-    Linear Regression finds the best-fit line through the data by minimizing
-    the sum of squared residuals (difference between predicted and actual).
-    
-    Formula: y = β₀ + β₁x₁ + β₂x₂ + ... + βₙxₙ
-    
-    Where:
-    - y is the predicted points
-    - β₀ is the intercept (bias)
-    - β₁...βₙ are the coefficients (weights) for each feature
-    - x₁...xₙ are the feature values
     
     Args:
         X: Feature DataFrame
