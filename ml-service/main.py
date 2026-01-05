@@ -78,10 +78,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    print("🚀 Starting FPL ML Service...")
+    print("Starting FPL ML Service...")
     
     try:
-        print("🔄 Checking for data updates...")
+        print("Checking for data updates...")
         data_dir = "data/raw/FPL-Elo-Insights"
         repo_url = "https://github.com/olbauday/FPL-Elo-Insights.git"
         
@@ -97,12 +97,12 @@ async def startup_event():
             print("  - Retraining models...")
             compare_models()
         
-        print("✅ Data check complete!")
+        print("Data check complete!")
         
-        print("✅ Data update and model retraining complete!")
+        print("Data update and model retraining complete!")
         
     except Exception as e:
-        print(f"⚠️ Data update failed: {e}")
+        print(f"Data update failed: {e}")
         print("  - Continuing with existing/fallback data if available.")
 
     predictor = get_predictor()
@@ -172,8 +172,6 @@ def optimize_squad_endpoint(request: OptimizeRequest):
 
 
 if __name__ == "__main__":
-    # We need to exclude the 'data' directory from reloading
-    # because our startup script modifies files there, which causes an infinite restart loop.
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
