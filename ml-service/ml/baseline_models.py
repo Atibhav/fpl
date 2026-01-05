@@ -18,12 +18,6 @@ MODELS_PATH.mkdir(exist_ok=True)
 
 
 def load_processed_data():
-    """
-    Load the processed training data from CSV.
-    
-    Returns:
-        tuple: (X, y) - features DataFrame and target Series
-    """
     data_path = Path(__file__).parent.parent / "data" / "processed_data.csv"
     
     if not data_path.exists():
@@ -55,17 +49,7 @@ def load_processed_data():
 
 
 def train_linear_regression(X, y, model_name='linear_regression'):
-    """
-    Train a Linear Regression model.
     
-    Args:
-        X: Feature DataFrame
-        y: Target Series
-        model_name: Name for saving the model
-    
-    Returns:
-        tuple: (model, metrics_dict)
-    """
     print(f"\n{'='*50}")
     print("Training Linear Regression Model")
     print(f"{'='*50}")
@@ -126,30 +110,7 @@ def train_linear_regression(X, y, model_name='linear_regression'):
 
 
 def train_ridge_regression(X, y, alpha=1.0, model_name='ridge_regression'):
-    """
-    Train a Ridge Regression model.
     
-    Ridge Regression is Linear Regression with L2 regularization.
-    It adds a penalty term to prevent overfitting:
-    
-    Loss = MSE + α * Σ(β²)
-    
-    Where α (alpha) controls regularization strength:
-    - Higher α = more regularization = simpler model
-    - Lower α = less regularization = more like standard linear regression
-    
-    University Concept: Regularization prevents overfitting by penalizing
-    large coefficients, making the model more generalizable.
-    
-    Args:
-        X: Feature DataFrame
-        y: Target Series
-        alpha: Regularization strength (default 1.0)
-        model_name: Name for saving the model
-    
-    Returns:
-        tuple: (model, metrics_dict)
-    """
     print(f"\n{'='*50}")
     print(f"Training Ridge Regression (α={alpha})")
     print(f"{'='*50}")
@@ -197,12 +158,6 @@ def train_ridge_regression(X, y, alpha=1.0, model_name='ridge_regression'):
 
 
 def compare_models():
-    """
-    Train and compare different baseline models.
-    
-    Returns:
-        dict: Results for each model
-    """
     print("\n" + "="*60)
     print("FPL Points Prediction - Baseline Model Training")
     print("="*60)
