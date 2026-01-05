@@ -1,4 +1,4 @@
-# FPL ML Team Builder ⚽🤖
+# FPL ML Team Builder 
 
 A full-stack AI-powered assistant for Fantasy Premier League managers. This application uses Machine Learning to predict player points, optimize squads, and help you build the perfect team.
 
@@ -7,7 +7,7 @@ A full-stack AI-powered assistant for Fantasy Premier League managers. This appl
 
 WEBSITE LIVE AT - (https://fpl-wheat.vercel.app/)
 
-## 🚀 Features
+##  Features
 
 *   **🔮 AI Point Predictions:** Uses Random Forest and XGBoost models to predict player performance for upcoming gameweeks.
 *   **🧠 Squad Optimizer:** Linear programming algorithm to generate the mathematically optimal team within your budget.
@@ -15,7 +15,7 @@ WEBSITE LIVE AT - (https://fpl-wheat.vercel.app/)
 *   **📊 Fixture Difficulty Analysis:** Visual indicators for upcoming match difficulty.
 *   **🔄 Auto-Updating Data:** Automatically fetches the latest match stats and retrains models daily.
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 *   **Frontend:** React.js (deployed on Vercel)
 *   **Backend:** Java Spring Boot (deployed on Render)
@@ -23,14 +23,14 @@ WEBSITE LIVE AT - (https://fpl-wheat.vercel.app/)
 *   **Database:** PostgreSQL (hosted on Supabase)
 *   **Data Source:** [FPL-Elo-Insights](https://github.com/olbauday/FPL-Elo-Insights)
 
-## 📂 Project Structure
+##  Project Structure
 
 *   `client/`: React frontend application.
 *   `server/`: Spring Boot REST API backend.
 *   `ml-service/`: Python Machine Learning service for predictions and optimization.
   
 
-## 🏃‍♂️ Getting Started (Local Dev)
+##  Getting Started (Local Dev)
 
 ### Prerequisites
 *   Node.js & npm
