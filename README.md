@@ -2,10 +2,7 @@
 
 A full-stack AI-powered assistant for Fantasy Premier League managers. This application uses Machine Learning to predict player points, optimize squads, and help you build the perfect team.
 
-![Project Status](https://img.shields.io/badge/Status-Live-success)
 ![Tech Stack](https://img.shields.io/badge/Stack-React%20|%20Spring%20Boot%20|%20Flask%20|%20PostgreSQL-blue)
-
-WEBSITE LIVE AT - (https://fpl-wheat.vercel.app/)
 
 ##  Features
 
