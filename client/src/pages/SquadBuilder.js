@@ -12,15 +12,12 @@ function SquadBuilder() {
   const [teamData, setTeamData] = useState(null);
   const [allPlayers, setAllPlayers] = useState([]);
   
-  // Gameweek State
   const [gameweeks, setGameweeks] = useState([]);
   const [currentGameweekId, setCurrentGameweekId] = useState(null);
   const [initialGameweekId, setInitialGameweekId] = useState(null);
   
-  // Squad State per Gameweek
   const [gameweekData, setGameweekData] = useState({});
   
-  // Derived state for current view
   const currentSquad = gameweekData[currentGameweekId]?.squad || [];
   const transfers = gameweekData[currentGameweekId]?.transfers || [];
   
@@ -43,7 +40,6 @@ function SquadBuilder() {
         const gws = await getGameweeks();
         setGameweeks(gws);
         
-        // Find the next active gameweek
         const nextGw = gws.find(gw => gw.is_next) || gws[0];
         if (nextGw) {
           setInitialGameweekId(nextGw.id);
@@ -158,14 +154,13 @@ function SquadBuilder() {
       setTeamData(userData);
       setAllPlayers(playersData);
       
-      // Initialize the first gameweek with fetched data
       if (initialGameweekId) {
         setGameweekData({
           [initialGameweekId]: {
             squad: userData.squad || [],
             transfers: [],
             bank: userData.bank || 0,
-            freeTransfers: 1 // Default to 1 FT for next GW
+            freeTransfers: 1
           }
         });
         setCurrentGameweekId(initialGameweekId);
@@ -179,14 +174,9 @@ function SquadBuilder() {
     }
   };
 
-  // Helper to update state for a specific GW
   const updateGameweekState = (gwId, newState) => {
     setGameweekData(prev => {
       const updated = { ...prev, [gwId]: { ...prev[gwId], ...newState } };
-      
-      // Propagate changes to future gameweeks
-      // If we change GW X, GW X+1 should inherit the resulting squad of GW X
-      // But we must preserve transfers made in GW X+1 if possible
       
       let currentGw = gwId;
       let nextGw = getNextGameweekId(currentGw);
@@ -194,13 +184,8 @@ function SquadBuilder() {
       let runningState = updated;
       
       while (nextGw && runningState[nextGw]) {
-        // The starting squad for nextGw is the ending squad of currentGw
         const prevGwState = runningState[currentGw];
         const prevSquadAfterTransfers = applyTransfersToSquad(prevGwState.squad, prevGwState.transfers);
-        
-        // We need to re-apply nextGw's transfers to this new base squad
-        // Note: This might fail if a player was transferred out in prevGw that is also transferred out in nextGw
-        // For simplicity, we'll just update the base squad and keep transfers if valid
         
         runningState = {
           ...runningState,
@@ -241,13 +226,10 @@ function SquadBuilder() {
     if (direction === 'next') {
       newId = getNextGameweekId(currentGameweekId);
       
-      // If moving to a new future GW that doesn't exist in state yet
       if (newId && !gameweekData[newId]) {
         const currentGwState = gameweekData[currentGameweekId];
         const squadAfterTransfers = applyTransfersToSquad(currentGwState.squad, currentGwState.transfers);
         
-        // Calculate bank after transfers
-        // This is a simplified calculation
         const bankAfterTransfers = calculateBankAfterTransfers(currentGwState);
 
         setGameweekData(prev => ({
@@ -256,13 +238,12 @@ function SquadBuilder() {
             squad: squadAfterTransfers,
             transfers: [],
             bank: bankAfterTransfers,
-            freeTransfers: 1 // Accumulate logic could go here (max 5)
+            freeTransfers: 1
           }
         }));
       }
     } else {
       newId = getPrevGameweekId(currentGameweekId);
-      // Prevent going before initial loaded GW
       if (newId < initialGameweekId) return;
     }
     
@@ -355,12 +336,26 @@ function SquadBuilder() {
     const pos1 = player1.squad_position;
     const pos2 = player2.squad_position;
     
+    const isP1Starter = pos1 <= 11;
+    const isP2Starter = pos2 <= 11;
+
+    let p1Updates = { squad_position: pos2 };
+    let p2Updates = { squad_position: pos1 };
+
+    if (isP1Starter !== isP2Starter) {
+      p1Updates.is_captain = player2.is_captain;
+      p1Updates.is_vice_captain = player2.is_vice_captain;
+      
+      p2Updates.is_captain = player1.is_captain;
+      p2Updates.is_vice_captain = player1.is_vice_captain;
+    }
+
     const newSquad = currentSquad.map(p => {
       if (p.id === player1.id) {
-        return { ...p, squad_position: pos2 };
+        return { ...p, ...p1Updates };
       }
       if (p.id === player2.id) {
-        return { ...p, squad_position: pos1 };
+        return { ...p, ...p2Updates };
       }
       return p;
     });
@@ -377,14 +372,18 @@ function SquadBuilder() {
         return;
       }
       
-      const isSwapStarterToBench = 
-        (selectedForSwap.squad_position <= 11 && player.squad_position > 11) ||
-        (selectedForSwap.squad_position > 11 && player.squad_position <= 11);
+      const p1 = selectedForSwap;
+      const p2 = player;
       
-      const isBothBench = selectedForSwap.squad_position > 11 && player.squad_position > 11;
+      const isP1Starter = p1.squad_position <= 11;
+      const isP2Starter = p2.squad_position <= 11;
       
-      const isEitherGK = selectedForSwap.position === 'GKP' || player.position === 'GKP';
-      const areBothGK = selectedForSwap.position === 'GKP' && player.position === 'GKP';
+      const isBothStarter = isP1Starter && isP2Starter;
+      const isBothBench = !isP1Starter && !isP2Starter;
+      const isSwapStarterToBench = isP1Starter !== isP2Starter;
+      
+      const isEitherGK = p1.position === 'GKP' || p2.position === 'GKP';
+      const areBothGK = p1.position === 'GKP' && p2.position === 'GKP';
       
       if (isBothBench) {
         if (isEitherGK) {
@@ -392,8 +391,18 @@ function SquadBuilder() {
           setSelectedForSwap(null);
           return;
         }
-        handleSwap(selectedForSwap, player);
+        handleSwap(p1, p2);
         setSelectedForSwap(null);
+        return;
+      }
+
+      if (isBothStarter) {
+        if (p1.position === p2.position) {
+          handleSwap(p1, p2);
+          setSelectedForSwap(null);
+        } else {
+          setSelectedForSwap(player);
+        }
         return;
       }
       
@@ -404,12 +413,12 @@ function SquadBuilder() {
           return;
         }
         
-        if (wouldBeValidSwap(selectedForSwap, player)) {
-          handleSwap(selectedForSwap, player);
+        if (wouldBeValidSwap(p1, p2)) {
+          handleSwap(p1, p2);
           setSelectedForSwap(null);
         } else {
-          const starter = selectedForSwap.squad_position <= 11 ? player : selectedForSwap;
-          const benchPlayer = selectedForSwap.squad_position > 11 ? player : selectedForSwap;
+          const starter = isP1Starter ? p1 : p2;
+          const benchPlayer = !isP1Starter ? p1 : p2;
           setSwapError(`Cannot sub ${benchPlayer.web_name} for ${starter.web_name} - invalid formation`);
           setSelectedForSwap(null);
         }
@@ -610,9 +619,11 @@ function SquadBuilder() {
     return Math.round((startingBudget - currentSquadValue) * 10) / 10;
   };
 
-  const calculateBudgetSimple = () => {
-    // Use the bank tracked in state
-    return gameweekData[currentGameweekId]?.bank || 0;
+  const calculateRemainingBudget = () => {
+    const gwState = gameweekData[currentGameweekId];
+    if (!gwState) return 0;
+    
+    return calculateBankAfterTransfers(gwState);
   };
 
   const renderPitchView = () => {
@@ -642,7 +653,13 @@ function SquadBuilder() {
         <div 
           key={player.id} 
           className={`pitch-player ${isSelectedForTransfer ? 'selected' : ''} ${isSelectedForSwap ? 'selected-swap' : ''} ${playerIsTransferredIn ? 'transferred-in' : ''}`}
-          onClick={() => openPlayerModal(player)}
+          onClick={() => {
+            if (selectedForSwap) {
+              handlePlayerClick(player);
+            } else {
+              openPlayerModal(player);
+            }
+          }}
         >
           {benchIndex !== null && <div className="bench-order">#{benchIndex}</div>}
           <div 
@@ -842,7 +859,7 @@ function SquadBuilder() {
             </div>
             <div className="info-item">
               <span className="label">Bank</span>
-              <span className="value">£{calculateBudgetSimple().toFixed(1)}m</span>
+              <span className="value">£{calculateRemainingBudget().toFixed(1)}m</span>
             </div>
             <div className="info-item">
               <span className="label">Free Transfers</span>
@@ -853,7 +870,7 @@ function SquadBuilder() {
           <div className="transfers-bar">
             <div className="transfer-stats">
               <span>Transfers: <strong>{transfers.length}</strong></span>
-              <span>Budget: <strong>£{calculateBudgetSimple().toFixed(1)}m</strong></span>
+              <span>Budget: <strong>£{calculateRemainingBudget().toFixed(1)}m</strong></span>
             </div>
             <div className="plan-actions">
               <button className="save-btn" onClick={savePlan}>Save Plan</button>

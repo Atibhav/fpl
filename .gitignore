@@ -128,3 +128,6 @@ ml-service/data/raw/
 # Processed data (regenerate with: python data/data_processor.py)
 ml-service/data/processed_data.csv
 
+# Private documentation
+private_docs/
+
