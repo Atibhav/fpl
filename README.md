@@ -2,15 +2,18 @@
 
 A full-stack AI-powered assistant for Fantasy Premier League managers. This application uses Machine Learning to predict player points, optimize squads, and help you build the perfect team.
 
-![Tech Stack](https://img.shields.io/badge/Stack-React%20|%20Spring%20Boot%20|%20Flask%20|%20PostgreSQL-blue)
+![Tech Stack](https://img.shields.io/badge/Stack-React%20|%20Spring%20Boot%20|%20FastAPI%20|%20PostgreSQL-blue)
+
+Website LIVE @ (https://fpl-wheat.vercel.app/)
+(note - server and ml service may take 5-10 mins to spin up due to inactivity)
 
 ##  Features
 
-*   **🔮 AI Point Predictions:** Uses Random Forest and XGBoost models to predict player performance for upcoming gameweeks.
-*   **🧠 Squad Optimizer:** Linear programming algorithm to generate the mathematically optimal team within your budget.
-*   **📋 Interactive Team Planner:** Drag-and-drop interface to build and visualize your squad.
-*   **📊 Fixture Difficulty Analysis:** Visual indicators for upcoming match difficulty.
-*   **🔄 Auto-Updating Data:** Automatically fetches the latest match stats and retrains models daily.
+*   ** AI Point Predictions:** Uses Random Forest and XGBoost models to predict player performance for upcoming gameweeks.
+*   ** Squad Optimizer:** Linear programming algorithm to generate the mathematically optimal team within your budget.
+*   ** Interactive Team Planner:** Drag-and-drop interface to build and visualize your squad.
+*   ** Fixture Difficulty Analysis:** Visual indicators for upcoming match difficulty.
+*   ** Auto-Updating Data:** Automatically fetches the latest match stats and retrains models daily.
 
 ##  Tech Stack
 
